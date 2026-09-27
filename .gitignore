@@ -1,0 +1,25 @@
+# --- virtualenv / python ---
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# --- nested PaddleOCR checkout (recreated by scripts/setup.ps1 at a pinned commit) ---
+/PaddleOCR/
+
+# --- generated datasets (recreated by scripts/prepare_dataset.py) ---
+/data/
+
+# --- generated training / export / report artifacts ---
+/output/
+/export/
+/reports/
+
+# --- heavy pretrained binary weights (auto-downloaded by setup.ps1 / download_base_models.py) ---
+pretrain_models/*.pdparams
+
+# --- OS noise ---
+Thumbs.db
+desktop.ini
+.DS_Store

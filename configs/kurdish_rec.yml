@@ -1,0 +1,194 @@
+# Kurdish (Sorani/Badini) Arabic-script text recognition.
+#
+# Derived from the official arabic_PP-OCRv5_mobile_rec training config that matches the
+# pinned PaddleOCR checkout. Architecture is byte-for-byte the official one so the
+# pretrained checkpoint loads; only data, dictionary, batching and scheduling differ.
+#
+# IMPORTANT: character_dict_path points at the base model's own 747-entry dictionary
+# (see configs/kurdish_dict.txt). That makes the CTC head 749 classes, exactly matching
+# the pretrained checkpoint, so the recognition head is NOT re-initialised. Building a
+# dataset-only dictionary instead would give 143 classes and throw the whole head away.
+#
+# Paths are relative to the PaddleOCR checkout root; train.ps1 runs from there.
+
+Global:
+  # Must stay a name PaddleOCR's tools/infer/predict_rec.py accepts, otherwise the
+  # exported model cannot be loaded by TextRecognizer. This project is architecturally
+  # the Arabic model fine-tuned on Kurdish, so the Arabic name is both accurate and the
+  # one the recogniser recognises. Output paths below still label everything kurdish.
+  model_name: arabic_PP-OCRv5_mobile_rec
+  debug: false
+  use_gpu: true
+  epoch_num: 40
+  log_smooth_window: 20
+  # Keep this well above 1. Every print_batch_step PaddleOCR runs an extra eval-mode
+  # forward pass plus a CPU CTC decode and Levenshtein score, and that cost lands inside
+  # the measured step time. At print_batch_step=1 this halved measured throughput
+  # (121 -> ~45 img/s) purely through reporting overhead.
+  print_batch_step: 20
+  save_model_dir: ../output/kurdish_full
+  save_epoch_step: 1
+  # Evaluate at the end of epoch 0 and then every 1000 steps so a long run reports
+  # validation quality while it is still going.
+  eval_batch_step: [0, 1000]
+  cal_metric_during_train: true
+  pretrained_model: ../pretrain_models/arabic_PP-OCRv5_mobile_rec_pretrained
+  checkpoints:
+  # Two frozen-backbone epochs: the transferred head adapts to Kurdish orthography
+  # before the visual features start moving. Shorter than the from-scratch 3 because
+  # the head is no longer random.
+  freeze_backbone_epochs: 2
+  save_inference_dir: ../export/kurdish_full
+  use_visualdl: false
+  infer_img:
+  # The "arabic" substring in this filename is load-bearing: PaddleOCR's CTCLabelDecode
+  # turns on right-to-left reversal only when the dictionary path contains it. Without
+  # that, validation accuracy is measured on visually reversed text and best_accuracy
+  # checkpoint selection picks the wrong model.
+  character_dict_path: ../configs/arabic_kurdish_dict.txt
+  # Longest label in this dataset is 24 characters, so 32 leaves headroom while
+  # cutting the NRTR decoder sequence length (and so training time) roughly in half.
+  # audit_dataset.py fails the build if any label exceeds this.
+  max_text_length: &max_text_length 32
+  infer_mode: false
+  use_space_char: true
+  distributed: false
+  save_res_path: ../output/kurdish_full/predictions.txt
+  d2s_train_image_shape: [3, 48, 320]
+  # O2 enables mixed precision, which is the single biggest throughput win on this GPU.
+  # train.ps1 -Amp:$false overrides to O0 for the FP32 correctness check.
+  amp_level: "O2"
+
+Optimizer:
+  name: Adam
+  beta1: 0.9
+  beta2: 0.999
+  lr:
+    name: Cosine
+    # Raised from 5e-4 to match the much larger measured batch (384 vs 32). A 12x
+    # larger batch with the old learning rate under-trains; the pilot phase is what
+    # confirms this converges before the full 40-epoch run.
+    learning_rate: 0.001
+    warmup_epoch: 3
+  regularizer:
+    name: L2
+    factor: 3.0e-05
+
+Architecture:
+  model_type: rec
+  algorithm: SVTR_LCNet
+  Transform:
+  Backbone:
+    name: PPLCNetV3
+    scale: 0.95
+  Head:
+    name: MultiHead
+    head_list:
+      - CTCHead:
+          Neck:
+            name: svtr
+            dims: 120
+            depth: 2
+            hidden_dims: 120
+            kernel_size: [1, 3]
+            use_guide: true
+          Head:
+            fc_decay: 0.00001
+      - NRTRHead:
+          nrtr_dim: 384
+          max_text_length: *max_text_length
+
+Loss:
+  name: MultiLoss
+  loss_config_list:
+    - CTCLoss:
+    - NRTRLoss:
+
+PostProcess:
+  name: CTCLabelDecode
+
+Metric:
+  name: RecMetric
+  main_indicator: acc
+  ignore_space: false
+
+Train:
+  dataset:
+    name: MultiScaleDataSet
+    ds_width: false
+    data_dir: ../data/kurdish_rec/
+    ext_op_transform_idx: 1
+    label_file_list:
+      - ../data/kurdish_rec/train_rec.txt
+    transforms:
+      - DecodeImage:
+          img_mode: BGR
+          channel_first: false
+      - RecConAug:
+          prob: 0.5
+          ext_data_num: 2
+          image_shape: [48, 320, 3]
+          max_text_length: *max_text_length
+      - RecAug:
+      - MultiLabelEncode:
+          gtc_encode: NRTRLabelEncode
+      - KeepKeys:
+          keep_keys:
+            - image
+            - label_ctc
+            - label_gtc
+            - length
+            - valid_ratio
+  sampler:
+    name: MultiScaleSampler
+    scales: [[320, 32], [320, 48], [320, 64]]
+    # Measured on this machine with scripts/probe_batch.py (RTX 4050 Laptop, 6 GB):
+    #   batch 256 -> 85-91 img/s, 2.9 GB reserved
+    #   batch 384 -> 121 img/s,        4.1 GB reserved   <- best
+    #   batch 448 -> 106 img/s,        5.7 GB reserved   (past the point of diminishing
+    #                                                         returns, 92% of VRAM)
+    # Must stay a multiple of 16 (divided_factor below), which train.ps1 enforces.
+    # Note MultiScaleSampler emits batches of first_bs, 2/3*first_bs and 1/2*first_bs for
+    # the three scales, so the average is ~0.89*first_bs.
+    first_bs: &bs 384
+    fix_bs: false
+    divided_factor: [8, 16]
+    is_training: true
+  loader:
+    shuffle: true
+    batch_size_per_card: *bs
+    drop_last: true
+    # Overridden by train.ps1 from the CPU count; each worker holds a full copy of
+    # the annotation list, so this scales with RAM, not just cores.
+    num_workers: 8
+
+Eval:
+  dataset:
+    name: SimpleDataSet
+    data_dir: ../data/kurdish_rec/
+    label_file_list:
+      - ../data/kurdish_rec/val_rec.txt
+    transforms:
+      - DecodeImage:
+          img_mode: BGR
+          channel_first: false
+      - MultiLabelEncode:
+          gtc_encode: NRTRLabelEncode
+      - RecResizeImg:
+          image_shape: [3, 48, 320]
+      - KeepKeys:
+          keep_keys:
+            - image
+            - label_ctc
+            - label_gtc
+            - length
+            - valid_ratio
+  loader:
+    shuffle: false
+    drop_last: false
+    # Deliberately NOT the training batch size. eval_batch_step runs the model in eval
+    # mode while the training allocator still holds its pool; matching 384 here is what
+    # exhausted a 6 GB card at step 1000 of the pilot. Evaluation carries no gradients,
+    # so 96 is both safe and fast (13,981 val images in about 40 s).
+    batch_size_per_card: 96
+    num_workers: 8

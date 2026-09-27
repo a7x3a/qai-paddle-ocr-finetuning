@@ -1,0 +1,24 @@
+-r PaddleOCR/requirements.txt
+
+# PaddlePaddle GPU wheels are not on PyPI; setup.ps1 installs this from
+# https://www.paddlepaddle.org.cn/packages/stable/cu126/ first, and the pin here keeps
+# the version in one place.
+paddlepaddle-gpu==3.3.1
+
+# These pins are not ours: paddlepaddle-gpu 3.3.1 declares exactly
+#   nvidia-cublas-cu12==12.6.4.1
+#   nvidia-cudnn-cu12==9.5.1.17
+# so overriding them makes pip's resolver fail on every reinstall.
+#
+# Known upstream inconsistency, expected and harmless in practice: Paddle 3.3.1's own
+# wheel metadata asks for cuDNN 9.5, but its compiled code was built against cuDNN 9.9
+# and prints, on every GPU call:
+#   "The installed Paddle is compiled with CUDNN 9.9, but CUDNN version in your machine
+#    is 9.5, which may cause serious incompatible bug."
+# Training and inference were both verified correct on this combination (see
+# reports/baseline and the pipeline summaries), so the pin is kept and the warning is
+# treated as cosmetic. verify_env.py reports it as a WARN rather than failing.
+#
+# If a future Paddle release fixes the mismatch, the warning disappears on its own.
+nvidia-cublas-cu12==12.6.4.1
+nvidia-cudnn-cu12==9.5.1.17
