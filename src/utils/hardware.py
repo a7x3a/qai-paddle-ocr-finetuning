@@ -58,6 +58,15 @@ def get_hardware_profile() -> HardwareProfile:
 
     # Check via nvidia-smi
     smi = shutil.which("nvidia-smi")
+    if not smi and os.name == "nt":
+        for cand in [
+            r"C:\Windows\System32\nvidia-smi.exe",
+            r"C:\Program Files\NVIDIA Corporation\NVSMI\nvidia-smi.exe",
+        ]:
+            if os.path.isfile(cand):
+                smi = cand
+                break
+
     if smi:
         try:
             res = subprocess.run(
@@ -74,6 +83,23 @@ def get_hardware_profile() -> HardwareProfile:
                     gpu_name = parts[0].strip()
                     gpu_memory_mb = int(float(parts[1].strip()))
                     has_gpu = gpu_memory_mb > 0
+        except Exception:
+            pass
+
+    # Windows WMI fallback if nvidia-smi failed or wasn't found
+    if not has_gpu and os.name == "nt":
+        try:
+            wmi_out = subprocess.run(
+                ["powershell", "-NoProfile", "-Command", "Get-CimInstance Win32_VideoController | Where-Object { $_.Name -like '*NVIDIA*' } | Select-Object -ExpandProperty Name"],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=5,
+            )
+            if wmi_out.returncode == 0 and wmi_out.stdout.strip():
+                gpu_name = wmi_out.stdout.strip().splitlines()[0]
+                gpu_memory_mb = 6144
+                has_gpu = True
         except Exception:
             pass
 

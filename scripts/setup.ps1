@@ -47,25 +47,51 @@ Write-QaiHeader 'Kurdish OCR Environment Setup'
 if ($SkipVenv) {
     Write-QaiStep 'skipping virtualenv creation (-SkipVenv)'
 }
-elseif (Test-Path $venvPython) {
-    Write-QaiOk 'virtualenv already present'
-}
 else {
-    Write-QaiStep 'creating virtual environment .venv...'
-    $launcher = Get-Command py -ErrorAction SilentlyContinue
-    if ($launcher) {
-        $pyTarget = & py --list 2>$null | Select-String -Pattern "3\.(12|11|10)" | Select-Object -First 1
-        if ($pyTarget -match "-(\d+\.\d+)") {
-            & py -$($Matches[1]) -m venv $venv
-        } else {
-            & py -3 -m venv $venv
+    if (Test-Path $venvPython) {
+        $existingVer = (& $venvPython -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}|{sys.maxsize > 2**32}')" 2>$null)
+        if ($existingVer) {
+            $parts = $existingVer.Trim().Split('|')
+            $pyVer = $parts[0].Trim()
+            $is64 = ($parts[1].Trim() -eq "True")
+            $bitText = if ($is64) { '64-bit' } else { '32-bit' }
+            if ($pyVer -ge "3.13" -or (-not $is64)) {
+                Write-QaiStep "Existing .venv uses incompatible Python $pyVer ($bitText). PaddlePaddle requires 64-bit Python 3.10-3.12."
+                Write-QaiStep "Removing incompatible .venv..."
+                Remove-Item -Recurse -Force $venv
+            } else {
+                Write-QaiOk "virtualenv present (Python $pyVer $bitText)"
+            }
         }
     }
-    else {
-        & python -m venv $venv
+
+    if (-not (Test-Path $venvPython)) {
+        Write-QaiStep 'creating virtual environment .venv...'
+        $found = $false
+        foreach ($ver in @('3.12', '3.11', '3.10')) {
+            $probe = & py -$ver -c "import sys; print(sys.maxsize > 2**32)" 2>$null
+            if ($LASTEXITCODE -eq 0 -and $probe.Trim() -eq "True") {
+                Write-QaiStep "Creating .venv using 64-bit Python $ver..."
+                & py -$ver -m venv $venv
+                $found = $true
+                break
+            }
+        }
+        if (-not $found) {
+            $defCheck = & python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}|{sys.maxsize > 2**32}')" 2>$null
+            if ($defCheck) {
+                $parts = $defCheck.Trim().Split('|')
+                if ($parts[0].Trim() -lt "3.13" -and $parts[1].Trim() -eq "True") {
+                    & python -m venv $venv
+                    $found = $true
+                }
+            }
+        }
+        if (-not (Test-Path $venvPython)) {
+            throw "PaddlePaddle requires 64-bit Python 3.10, 3.11, or 3.12 (Python 3.13 is not supported yet). Please install Python 3.12 64-bit from: https://www.python.org/downloads/release/python-3129/"
+        }
+        Write-QaiOk 'created .venv'
     }
-    if (-not (Test-Path $venvPython)) { throw "venv creation failed; expected $venvPython" }
-    Write-QaiOk 'created .venv'
 }
 
 if (-not (Test-Path $venvPython)) { throw "no interpreter at $venvPython" }
@@ -85,32 +111,44 @@ try {
         Write-QaiStep 'skipping Paddle install (-SkipPaddleInstall)'
     }
     else {
+        $nvidiaGpu = Get-QaiNvidiaGpu
         $smi = Get-QaiNvidiaSmi
-        $cudaVer = 0
-        if ($smi -and (-not $CpuOnly)) {
-            $smiOut = & $smi 2>$null | Out-String
-            if ($smiOut -match "CUDA Version:\s*(\d+)\.(\d+)") {
-                $cudaVer = [float]"$($Matches[1]).$($Matches[2])"
-            }
-        }
+        $hasNvidia = ($null -ne $nvidiaGpu) -or ($null -ne $smi)
 
-        if ($cudaVer -ge 12.0 -and (-not $CpuOnly)) {
-            Write-QaiStep "detected NVIDIA GPU with CUDA $cudaVer -> installing paddlepaddle-gpu 3.3.1 (cu126)..."
-            & $python -m pip install "paddlepaddle-gpu==3.3.1" `
-                --extra-index-url https://www.paddlepaddle.org.cn/packages/stable/cu126/ --quiet
-        }
-        elseif ($cudaVer -ge 11.0 -and (-not $CpuOnly)) {
-            Write-QaiStep "detected NVIDIA GPU with CUDA $cudaVer -> installing paddlepaddle-gpu 3.3.1 (cu118)..."
-            & $python -m pip install "paddlepaddle-gpu==3.3.1" `
-                --extra-index-url https://www.paddlepaddle.org.cn/packages/stable/cu118/ --quiet
+        if ($hasNvidia -and (-not $CpuOnly)) {
+            $gpuTitle = if ($nvidiaGpu) { $nvidiaGpu.Name } else { "NVIDIA GPU" }
+            $cudaVer = 12.6
+            if ($smi) {
+                $smiOut = & $smi 2>$null | Out-String
+                if ($smiOut -match "CUDA Version:\s*(\d+)\.(\d+)") {
+                    $cudaVer = [float]"$($Matches[1]).$($Matches[2])"
+                }
+            }
+
+            if ($cudaVer -lt 12.0 -and $cudaVer -ge 11.0) {
+                Write-QaiStep "Detected $gpuTitle (CUDA $cudaVer) -> installing paddlepaddle-gpu (cu118)..."
+                & $python -m pip install "paddlepaddle-gpu==3.3.1" `
+                    --extra-index-url https://www.paddlepaddle.org.cn/packages/stable/cu118/
+            } else {
+                Write-QaiStep "Detected $gpuTitle (CUDA $cudaVer) -> installing paddlepaddle-gpu (cu126)..."
+                & $python -m pip install "paddlepaddle-gpu==3.3.1" `
+                    --extra-index-url https://www.paddlepaddle.org.cn/packages/stable/cu126/
+                if ($LASTEXITCODE -ne 0) {
+                    Write-QaiStep "cu126 installation retry with cu118..."
+                    & $python -m pip install "paddlepaddle-gpu==3.3.1" `
+                        --extra-index-url https://www.paddlepaddle.org.cn/packages/stable/cu118/
+                }
+            }
+
+            if ($LASTEXITCODE -ne 0) { throw 'failed to install paddlepaddle-gpu. Ensure internet connection to paddlepaddle.org.cn and that 64-bit Python 3.10-3.12 is active.' }
+            Write-QaiOk "paddlepaddle-gpu installed successfully for $gpuTitle"
         }
         else {
             Write-QaiStep 'installing CPU-only paddlepaddle 3.3.1...'
-            & $python -m pip install "paddlepaddle==3.3.1" --quiet
+            & $python -m pip install "paddlepaddle==3.3.1"
+            if ($LASTEXITCODE -ne 0) { throw 'failed to install paddlepaddle' }
+            Write-QaiOk 'paddlepaddle installed successfully'
         }
-
-        if ($LASTEXITCODE -ne 0) { throw 'failed to install paddlepaddle' }
-        Write-QaiOk 'paddlepaddle installed successfully'
     }
 
     # ------------------------------------------------------------ 3. PaddleOCR Git Checkout
