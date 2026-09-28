@@ -158,44 +158,53 @@ try {
         $smi = Get-QaiNvidiaSmi
         $hasNvidia = ($null -ne $nvidiaGpu) -or ($null -ne $smi)
 
-        if ($hasNvidia -and (-not $CpuOnly)) {
-            $gpuTitle = if ($nvidiaGpu) { $nvidiaGpu.Name } else { "NVIDIA GPU" }
-            $cudaVer = 12.6
-            if ($smi) {
-                $smiOut = & $smi 2>$null | Out-String
-                if ($smiOut -match "CUDA Version:\s*(\d+)\.(\d+)") {
-                    $cudaVer = [float]"$($Matches[1]).$($Matches[2])"
-                }
-            }
+        $isBlackwellOr50 = ($gpuTitle -match "RTX 50|Blackwell") -or ($cudaVer -ge 12.8) -or ($cudaVer -ge 13.0)
+        $installedGpu = $false
 
+        if ($hasNvidia -and (-not $CpuOnly)) {
             # Remove CPU paddlepaddle to avoid namespace collision
             & $python -m pip uninstall -y paddlepaddle 2>$null
 
-            if ($cudaVer -lt 12.0 -and $cudaVer -ge 11.0) {
-                Write-QaiStep "Detected $gpuTitle (CUDA $cudaVer) -> installing paddlepaddle-gpu (cu118)..."
-                & $python -m pip install "paddlepaddle-gpu==3.3.1" `
-                    --extra-index-url https://www.paddlepaddle.org.cn/packages/stable/cu118/ --timeout 120 --retries 5
-            } else {
-                Write-QaiStep "Detected $gpuTitle (CUDA $cudaVer) -> installing paddlepaddle-gpu (cu126)..."
-                & $python -m pip install "paddlepaddle-gpu==3.3.1" `
-                    --extra-index-url https://www.paddlepaddle.org.cn/packages/stable/cu126/ --timeout 120 --retries 5
-                if ($LASTEXITCODE -ne 0) {
-                    Write-QaiStep "cu126 installation retry with cu118..."
+            if ($isBlackwellOr50) {
+                Write-QaiStep "Detected Blackwell / RTX 50-Series architecture ($gpuTitle, CUDA $cudaVer) -> installing paddlepaddle-gpu 3.4.0 (cu129)..."
+                & $python -m pip install "paddlepaddle-gpu==3.4.0" `
+                    --extra-index-url https://www.paddlepaddle.org.cn/packages/stable/cu129/ --timeout 120 --retries 5
+                if ($LASTEXITCODE -eq 0) { $installedGpu = $true }
+            }
+
+            if (-not $installedGpu) {
+                if ($cudaVer -lt 12.0 -and $cudaVer -ge 11.0) {
+                    Write-QaiStep "Detected $gpuTitle (CUDA $cudaVer) -> installing paddlepaddle-gpu 3.3.1 (cu118)..."
                     & $python -m pip install "paddlepaddle-gpu==3.3.1" `
                         --extra-index-url https://www.paddlepaddle.org.cn/packages/stable/cu118/ --timeout 120 --retries 5
+                    if ($LASTEXITCODE -eq 0) { $installedGpu = $true }
+                } else {
+                    Write-QaiStep "Detected $gpuTitle (CUDA $cudaVer) -> installing paddlepaddle-gpu 3.3.1 (cu126)..."
+                    & $python -m pip install "paddlepaddle-gpu==3.3.1" `
+                        --extra-index-url https://www.paddlepaddle.org.cn/packages/stable/cu126/ --timeout 120 --retries 5
+                    if ($LASTEXITCODE -eq 0) { $installedGpu = $true }
+                    if (-not $installedGpu) {
+                        Write-QaiStep "cu126 installation retry with cu118..."
+                        & $python -m pip install "paddlepaddle-gpu==3.3.1" `
+                            --extra-index-url https://www.paddlepaddle.org.cn/packages/stable/cu118/ --timeout 120 --retries 5
+                        if ($LASTEXITCODE -eq 0) { $installedGpu = $true }
+                    }
                 }
             }
 
-            if ($LASTEXITCODE -ne 0) { throw 'failed to install paddlepaddle-gpu. Ensure internet connection to paddlepaddle.org.cn and that 64-bit Python 3.10-3.12 is active.' }
-            Write-QaiOk "paddlepaddle-gpu installed successfully for $gpuTitle"
+            if ($installedGpu) {
+                Write-QaiOk "paddlepaddle-gpu installed successfully for $gpuTitle"
+            } else {
+                Write-Host "  [!] GPU wheel installation failed. Falling back cleanly to CPU..." -ForegroundColor Yellow
+            }
         }
-        else {
+
+        if (-not $installedGpu) {
             Write-QaiStep 'installing CPU-only paddlepaddle 3.3.1...'
-            # Remove GPU paddlepaddle if present
             & $python -m pip uninstall -y paddlepaddle-gpu 2>$null
             & $python -m pip install "paddlepaddle==3.3.1" --timeout 120 --retries 5
             if ($LASTEXITCODE -ne 0) { throw 'failed to install paddlepaddle' }
-            Write-QaiOk 'paddlepaddle installed successfully'
+            Write-QaiOk 'paddlepaddle installed successfully (CPU mode)'
         }
     }
 

@@ -9,19 +9,33 @@ import subprocess
 import sys
 from pathlib import Path
 
+# Force UTF-8 stream reconfiguration on Windows to prevent UnicodeEncodeError: 'charmap'
+if sys.platform == "win32":
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    if hasattr(sys.stderr, "reconfigure"):
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 # Ensure project root is in sys.path
 PROJECT_ROOT = Path(__file__).resolve().parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-# Self-healing: if running with external/system interpreter and a local .venv exists, re-launch under .venv
-_target_venv = (
-    PROJECT_ROOT / ".venv" / "Scripts" / "python.exe"
-    if os.name == "nt"
-    else PROJECT_ROOT / ".venv" / "bin" / "python"
-)
-if _target_venv.is_file() and Path(sys.executable).resolve() != _target_venv.resolve():
-    sys.exit(subprocess.call([str(_target_venv), str(Path(__file__).resolve())] + sys.argv[1:]))
+# Virtual Environment & Dependency Guardrail:
+# If running with system Python while a local .venv exists, instruct user to activate it and exit cleanly.
+_is_setup = len(sys.argv) > 1 and sys.argv[1] == "setup"
+_venv_path = PROJECT_ROOT / ".venv"
+if (sys.prefix == sys.base_prefix) and _venv_path.is_dir() and not _is_setup:
+    _activate_cmd = r".\.venv\Scripts\activate" if os.name == "nt" else "source .venv/bin/activate"
+    print(
+        f"\n[ALERT] You are running with the system Python interpreter: {sys.executable}\n"
+        f"A local virtual environment was detected at: {_venv_path}\n"
+        f"Please activate the virtual environment before running pipeline commands:\n\n"
+        f"    {_activate_cmd}\n\n"
+        f"Then re-run: python main.py {' '.join(sys.argv[1:])}\n",
+        file=sys.stderr,
+    )
+    sys.exit(1)
 
 # Also ensure PaddleOCR repository directory is accessible
 if (PROJECT_ROOT / "PaddleOCR").is_dir() and str(PROJECT_ROOT / "PaddleOCR") not in sys.path:
@@ -57,6 +71,58 @@ def handle_setup(args: argparse.Namespace) -> None:
     logger.info("Executing automated environment setup...")
     profile = get_hardware_profile()
     logger.info(f"Compute Hardware: {profile.gpu_name} ({profile.gpu_memory_mb} MB VRAM, {profile.cpu_cores} CPU cores)")
+
+    # 0. Hardware-aware PaddlePaddle installation if missing or requested
+    try:
+        import paddle
+        has_paddle = True
+    except ImportError:
+        has_paddle = False
+
+    if not has_paddle or getattr(args, "install_paddle", False):
+        import re
+        logger.info("Resolving optimal PaddlePaddle wheel for detected architecture...")
+        gpu_name = profile.gpu_name
+        is_blackwell = bool(re.search(r"RTX 50|Blackwell", gpu_name, re.IGNORECASE))
+        no_gpu = getattr(args, "no_gpu", False)
+
+        installed = False
+        if profile.has_gpu and not no_gpu:
+            if is_blackwell:
+                logger.info("Blackwell / RTX 50-Series detected -> Installing paddlepaddle-gpu 3.4.0 (cu129)...")
+                ret = subprocess.run([
+                    sys.executable, "-m", "pip", "install", "paddlepaddle-gpu==3.4.0",
+                    "--extra-index-url", "https://www.paddlepaddle.org.cn/packages/stable/cu129/",
+                    "--timeout", "120", "--retries", "5",
+                ]).returncode
+                if ret == 0:
+                    installed = True
+
+            if not installed:
+                logger.info("Installing paddlepaddle-gpu 3.3.1 (cu126)...")
+                ret = subprocess.run([
+                    sys.executable, "-m", "pip", "install", "paddlepaddle-gpu==3.3.1",
+                    "--extra-index-url", "https://www.paddlepaddle.org.cn/packages/stable/cu126/",
+                    "--timeout", "120", "--retries", "5",
+                ]).returncode
+                if ret == 0:
+                    installed = True
+                else:
+                    logger.info("cu126 failed; retrying with cu118...")
+                    ret = subprocess.run([
+                        sys.executable, "-m", "pip", "install", "paddlepaddle-gpu==3.3.1",
+                        "--extra-index-url", "https://www.paddlepaddle.org.cn/packages/stable/cu118/",
+                        "--timeout", "120", "--retries", "5",
+                    ]).returncode
+                    if ret == 0:
+                        installed = True
+
+        if not installed:
+            logger.info("Installing CPU-only paddlepaddle 3.3.1...")
+            subprocess.run([
+                sys.executable, "-m", "pip", "install", "paddlepaddle==3.3.1",
+                "--timeout", "120", "--retries", "5",
+            ], check=True)
 
     # 1. Clone / checkout pinned PaddleOCR
     if not (PADDLE_ROOT / ".git").is_dir():
@@ -359,6 +425,8 @@ def main() -> None:
     p_setup = subparsers.add_parser("setup", help="Automated setup of PaddleOCR, dependencies, base models & dataset")
     p_setup.add_argument("--skip-dataset", action="store_true", help="Skip dataset download/preparation")
     p_setup.add_argument("--force-data", action="store_true", help="Force re-extraction of dataset")
+    p_setup.add_argument("--install-paddle", action="store_true", help="Install or update architecture-optimized PaddlePaddle")
+    p_setup.add_argument("--no-gpu", action="store_true", help="Force CPU-only installation")
     p_setup.set_defaults(func=handle_setup)
 
     # 1. prepare-data

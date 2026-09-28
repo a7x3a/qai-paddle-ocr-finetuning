@@ -6,6 +6,7 @@ and exports comprehensive Markdown comparison reports.
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
@@ -14,6 +15,68 @@ try:
     HAS_TABULATE = True
 except ImportError:
     HAS_TABULATE = False
+
+
+def _safe_format_table(table_data: list[list[Any]], headers: list[str]) -> str:
+    """Format table with tabulate, safely degrading to ASCII or pipe format if encoding fails."""
+    encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
+
+    # Pre-clean string cells so that any character not encodable is safely handled
+    safe_data: list[list[Any]] = []
+    for row in table_data:
+        safe_row = []
+        for cell in row:
+            if isinstance(cell, str):
+                try:
+                    cell.encode(encoding)
+                    safe_row.append(cell)
+                except (UnicodeEncodeError, UnicodeError):
+                    safe_row.append(cell.encode(encoding, errors="replace").decode(encoding, errors="replace"))
+            else:
+                safe_row.append(cell)
+        safe_data.append(safe_row)
+
+    if HAS_TABULATE:
+        # 1. Try fancy Unicode grid
+        try:
+            rendered = tabulate(safe_data, headers=headers, tablefmt="fancy_grid")
+            rendered.encode(encoding)
+            return rendered
+        except (UnicodeEncodeError, UnicodeError):
+            pass
+
+        # 2. Fall back to standard ASCII grid
+        try:
+            rendered = tabulate(safe_data, headers=headers, tablefmt="grid")
+            rendered.encode(encoding)
+            return rendered
+        except (UnicodeEncodeError, UnicodeError):
+            pass
+
+        # 3. Fall back to simple pipe formatting
+        try:
+            rendered = tabulate(safe_data, headers=headers, tablefmt="pipe")
+            rendered.encode(encoding)
+            return rendered
+        except (UnicodeEncodeError, UnicodeError):
+            pass
+
+    # Built-in ASCII fallback table
+    try:
+        col_widths = [
+            max(len(str(item)) for item in [h] + [row[idx] for row in safe_data])
+            for idx, h in enumerate(headers)
+        ]
+        header_line = " | ".join(h.ljust(col_widths[i]) for i, h in enumerate(headers))
+        sep_line = "-+-".join("-" * col_widths[i] for i in range(len(headers)))
+        body_lines = [
+            " | ".join(str(cell).ljust(col_widths[i]) for i, cell in enumerate(row))
+            for row in safe_data
+        ]
+        text = "\n".join([header_line, sep_line] + body_lines)
+        return text.encode(encoding, errors="replace").decode(encoding, errors="replace")
+    except Exception:
+        return "\n".join(str(row) for row in [headers] + safe_data)
 
 
 class Visualizer:
@@ -76,16 +139,7 @@ class Visualizer:
             ])
 
         headers = ["Model / Checkpoint", "CER (Micro)", "WER (Micro)", "Accuracy", "Latency (ms)", "Throughput (FPS)"]
-
-        if HAS_TABULATE:
-            return tabulate(table_data, headers=headers, tablefmt="fancy_grid")
-
-        # Built-in ASCII fallback table
-        col_widths = [max(len(str(item)) for item in [h] + [row[idx] for row in table_data]) for idx, h in enumerate(headers)]
-        header_line = " | ".join(h.ljust(col_widths[i]) for i, h in enumerate(headers))
-        sep_line = "-+-".join("-" * col_widths[i] for i in range(len(headers)))
-        body_lines = [" | ".join(str(cell).ljust(col_widths[i]) for i, cell in enumerate(row)) for row in table_data]
-        return "\n".join([header_line, sep_line] + body_lines)
+        return _safe_format_table(table_data, headers)
 
     @classmethod
     def render_predictions(cls, rows: list[dict[str, Any]]) -> str:
@@ -119,14 +173,7 @@ class Visualizer:
                 for r in rows
             ]
 
-        if HAS_TABULATE:
-            return tabulate(table_data, headers=headers, tablefmt="fancy_grid")
-
-        col_widths = [max(len(str(item)) for item in [h] + [row[idx] for row in table_data]) for idx, h in enumerate(headers)]
-        header_line = " | ".join(h.ljust(col_widths[i]) for i, h in enumerate(headers))
-        sep_line = "-+-".join("-" * col_widths[i] for i in range(len(headers)))
-        body_lines = [" | ".join(str(cell).ljust(col_widths[i]) for i, cell in enumerate(row)) for row in table_data]
-        return "\n".join([header_line, sep_line] + body_lines)
+        return _safe_format_table(table_data, headers)
 
     @classmethod
     def generate_markdown_report(

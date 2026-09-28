@@ -63,6 +63,29 @@ class SmokeTester:
             logger.info(f"Total Dedicated VRAM: {total_mem_gb:.2f} GB")
 
             paddle.set_device("gpu:0")
+
+            # Mathematical tensor kernel execution verification
+            try:
+                t1 = paddle.to_tensor([1.0, 2.0], dtype="float32")
+                t2 = t1 + 1.0
+                paddle.device.synchronize()
+                res = t2.numpy().tolist()
+                # Verify that t2.numpy() matches [2.0, 3.0] and does not return uninitialized zeros
+                if res != [2.0, 3.0]:
+                    raise ValueError(
+                        f"Kernel execution returned invalid result: {res} (expected [2.0, 3.0]). "
+                        f"Uninitialized zeros indicate missing SM architecture cubins."
+                    )
+            except Exception as e:
+                raise RuntimeError(
+                    f"CUDA tensor kernel verification failed on device '{dev_name}': {e}\n"
+                    f"Your GPU architecture (e.g. RTX 50-Series / Blackwell sm_120) requires 'paddlepaddle-gpu>=3.4.0' (cu129).\n"
+                    f"Please install via: pip install paddlepaddle-gpu==3.4.0 --extra-index-url https://www.paddlepaddle.org.cn/packages/stable/cu129/\n"
+                    f"or run with '--no-gpu' to execute on CPU."
+                ) from e
+
+            logger.info("CUDA kernel computation verified: [1.0, 2.0] + 1.0 == [2.0, 3.0]")
+
             return {
                 "cuda_compiled": True,
                 "device_count": dev_count,

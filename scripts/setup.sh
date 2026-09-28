@@ -40,28 +40,55 @@ fi
 echo "[*] Detecting compute hardware..."
 CUDA_MAJOR=""
 CUDA_VER=""
+GPU_NAME=""
 if command -v nvidia-smi &> /dev/null; then
     CUDA_VER=$(nvidia-smi 2>/dev/null | grep -o "CUDA Version: [0-9]*\.[0-9]*" | head -n1 | awk '{print $3}' || true)
     if [ -n "${CUDA_VER}" ]; then
         CUDA_MAJOR=$(echo "${CUDA_VER}" | cut -d. -f1)
     fi
+    GPU_NAME=$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -n1 || true)
 fi
 
-if [ -n "${CUDA_MAJOR}" ] && [ "${CUDA_MAJOR}" -ge 12 ] 2>/dev/null; then
+IS_BLACKWELL=0
+if echo "${GPU_NAME}" | grep -Ei "RTX 50|Blackwell" &>/dev/null; then
+    IS_BLACKWELL=1
+elif [ -n "${CUDA_MAJOR}" ] && [ "${CUDA_MAJOR}" -ge 13 ] 2>/dev/null; then
+    IS_BLACKWELL=1
+elif [ -n "${CUDA_VER}" ]; then
+    CUDA_MINOR=$(echo "${CUDA_VER}" | cut -d. -f2)
+    if [ "${CUDA_MAJOR}" -eq 12 ] && [ "${CUDA_MINOR:-0}" -ge 8 ] 2>/dev/null; then
+        IS_BLACKWELL=1
+    fi
+fi
+
+INSTALLED_PADDLE=0
+if [ "${IS_BLACKWELL}" -eq 1 ]; then
+    echo "[*] Blackwell / RTX 50-Series detected (${GPU_NAME}, CUDA ${CUDA_VER}) -> Installing paddlepaddle-gpu 3.4.0 (cu129)..."
+    if ${PYTHON} -m pip install "paddlepaddle-gpu==3.4.0" \
+        --extra-index-url https://www.paddlepaddle.org.cn/packages/stable/cu129/ --timeout 120 --retries 5 --quiet; then
+        INSTALLED_PADDLE=1
+    fi
+fi
+
+if [ "${INSTALLED_PADDLE}" -eq 0 ] && [ -n "${CUDA_MAJOR}" ] && [ "${CUDA_MAJOR}" -ge 12 ] 2>/dev/null; then
     echo "[*] NVIDIA GPU detected with CUDA ${CUDA_VER} -> Installing paddlepaddle-gpu 3.3.1 (cu126)..."
-    ${PYTHON} -m pip install "paddlepaddle-gpu==3.3.1" \
-        --extra-index-url https://www.paddlepaddle.org.cn/packages/stable/cu126/ --quiet
-elif [ -n "${CUDA_MAJOR}" ] && [ "${CUDA_MAJOR}" -ge 11 ] 2>/dev/null; then
+    if ${PYTHON} -m pip install "paddlepaddle-gpu==3.3.1" \
+        --extra-index-url https://www.paddlepaddle.org.cn/packages/stable/cu126/ --timeout 120 --retries 5 --quiet; then
+        INSTALLED_PADDLE=1
+    fi
+fi
+
+if [ "${INSTALLED_PADDLE}" -eq 0 ] && [ -n "${CUDA_MAJOR}" ] && [ "${CUDA_MAJOR}" -ge 11 ] 2>/dev/null; then
     echo "[*] NVIDIA GPU detected with CUDA ${CUDA_VER} -> Installing paddlepaddle-gpu 3.3.1 (cu118)..."
-    ${PYTHON} -m pip install "paddlepaddle-gpu==3.3.1" \
-        --extra-index-url https://www.paddlepaddle.org.cn/packages/stable/cu118/ --quiet
-elif command -v nvidia-smi &> /dev/null; then
-    echo "[*] NVIDIA GPU detected -> Installing paddlepaddle-gpu 3.3.1 (cu126)..."
-    ${PYTHON} -m pip install "paddlepaddle-gpu==3.3.1" \
-        --extra-index-url https://www.paddlepaddle.org.cn/packages/stable/cu126/ --quiet
-else
-    echo "[*] No CUDA GPU detected -> Installing CPU-only paddlepaddle 3.3.1..."
-    ${PYTHON} -m pip install "paddlepaddle==3.3.1" --quiet
+    if ${PYTHON} -m pip install "paddlepaddle-gpu==3.3.1" \
+        --extra-index-url https://www.paddlepaddle.org.cn/packages/stable/cu118/ --timeout 120 --retries 5 --quiet; then
+        INSTALLED_PADDLE=1
+    fi
+fi
+
+if [ "${INSTALLED_PADDLE}" -eq 0 ]; then
+    echo "[*] Fallback: Installing CPU-only paddlepaddle 3.3.1..."
+    ${PYTHON} -m pip install "paddlepaddle==3.3.1" --timeout 120 --retries 5 --quiet
 fi
 
 # 4. Clone PaddleOCR at pinned commit
