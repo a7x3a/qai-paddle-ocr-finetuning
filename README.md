@@ -22,6 +22,9 @@ flowchart LR
 
 ### Step 1: Install Everything (1-Click)
 
+> [!IMPORTANT]
+> **Prerequisites**: Ensure you have 64-bit **Python 3.10, 3.11, or 3.12** installed (PaddlePaddle 3.3.1 does not have wheels for Python 3.13 yet). If you have an NVIDIA GPU, `setup.bat` automatically detects your GPU and installs GPU-accelerated PaddlePaddle.
+
 Clone the repo and run the setup script for your OS:
 
 - **On Windows**:
