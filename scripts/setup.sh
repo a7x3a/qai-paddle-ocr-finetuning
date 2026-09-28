@@ -27,21 +27,38 @@ fi
 echo "[*] Upgrading pip..."
 ${PYTHON} -m pip install -U pip setuptools wheel --quiet
 
-# 3. Detect Hardware & Install PaddlePaddle
-echo "[*] Detecting compute hardware..."
-CUDA_VER=""
-if command -v nvidia-smi &> /dev/null; then
-    CUDA_VER=$(nvidia-smi | grep -o "CUDA Version: [0-9]*\.[0-9]*" | awk '{print $3}' || true)
+# 2b. Check Python version compatibility (PaddlePaddle requires 64-bit Python 3.9 - 3.12)
+PY_VER=$(${PYTHON} -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+PY_MAJOR=$(${PYTHON} -c "import sys; print(sys.version_info.major)")
+PY_MINOR=$(${PYTHON} -c "import sys; print(sys.version_info.minor)")
+if [ "${PY_MAJOR}" -ne 3 ] || [ "${PY_MINOR}" -lt 9 ] || [ "${PY_MINOR}" -gt 12 ]; then
+    echo "[!] WARNING: PaddlePaddle 3.3.1 officially supports Python 3.9 - 3.12 (current is Python ${PY_VER})."
+    echo "[!] If installation fails with 'No matching distribution found', please use Python 3.11 or 3.12."
 fi
 
-if [[ -n "${CUDA_VER}" && $(echo "${CUDA_VER} >= 12.0" | bc -l 2>/dev/null || echo 1) -eq 1 ]]; then
+# 3. Detect Hardware & Install PaddlePaddle
+echo "[*] Detecting compute hardware..."
+CUDA_MAJOR=""
+CUDA_VER=""
+if command -v nvidia-smi &> /dev/null; then
+    CUDA_VER=$(nvidia-smi 2>/dev/null | grep -o "CUDA Version: [0-9]*\.[0-9]*" | head -n1 | awk '{print $3}' || true)
+    if [ -n "${CUDA_VER}" ]; then
+        CUDA_MAJOR=$(echo "${CUDA_VER}" | cut -d. -f1)
+    fi
+fi
+
+if [ -n "${CUDA_MAJOR}" ] && [ "${CUDA_MAJOR}" -ge 12 ] 2>/dev/null; then
     echo "[*] NVIDIA GPU detected with CUDA ${CUDA_VER} -> Installing paddlepaddle-gpu 3.3.1 (cu126)..."
     ${PYTHON} -m pip install "paddlepaddle-gpu==3.3.1" \
         --extra-index-url https://www.paddlepaddle.org.cn/packages/stable/cu126/ --quiet
-elif [[ -n "${CUDA_VER}" && $(echo "${CUDA_VER} >= 11.0" | bc -l 2>/dev/null || echo 0) -eq 1 ]]; then
+elif [ -n "${CUDA_MAJOR}" ] && [ "${CUDA_MAJOR}" -ge 11 ] 2>/dev/null; then
     echo "[*] NVIDIA GPU detected with CUDA ${CUDA_VER} -> Installing paddlepaddle-gpu 3.3.1 (cu118)..."
     ${PYTHON} -m pip install "paddlepaddle-gpu==3.3.1" \
         --extra-index-url https://www.paddlepaddle.org.cn/packages/stable/cu118/ --quiet
+elif command -v nvidia-smi &> /dev/null; then
+    echo "[*] NVIDIA GPU detected -> Installing paddlepaddle-gpu 3.3.1 (cu126)..."
+    ${PYTHON} -m pip install "paddlepaddle-gpu==3.3.1" \
+        --extra-index-url https://www.paddlepaddle.org.cn/packages/stable/cu126/ --quiet
 else
     echo "[*] No CUDA GPU detected -> Installing CPU-only paddlepaddle 3.3.1..."
     ${PYTHON} -m pip install "paddlepaddle==3.3.1" --quiet
