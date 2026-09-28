@@ -1,62 +1,73 @@
-"""Shared paths and constants for the Kurdish OCR pipeline."""
+"""Shared paths and constants for the Kurdish OCR pipeline (re-exported from src.utils.paths)."""
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
-PADDLE_ROOT = PROJECT_ROOT / "PaddleOCR"
+# Ensure project root is in sys.path
+_project_root = Path(__file__).resolve().parents[2]
+if str(_project_root) not in sys.path:
+    sys.path.insert(0, str(_project_root))
 
-DATA_ROOT = PROJECT_ROOT / "data"
-RAW_ROOT = DATA_ROOT / "qai-ocr-v1-small"
-REC_ROOT = DATA_ROOT / "kurdish_rec"
+from src.utils.paths import (
+    ASSETS_DIR,
+    BASE_INFERENCE_SHA256,
+    BASE_INFERENCE_URL,
+    BASE_MODEL_DIR,
+    BASE_PRETRAINED,
+    BASE_PRETRAINED_URL,
+    CONFIG_DIR,
+    DATA_ROOT,
+    DATASET_REPO,
+    DATASET_REVISION,
+    DICT_PATH,
+    EXPORT_ROOT,
+    MAX_TEXT_LENGTH,
+    OUTPUT_ROOT,
+    PADDLE_COMMIT,
+    PADDLE_REPO,
+    PADDLE_ROOT,
+    PHASES,
+    PRETRAIN_DIR,
+    PRETRAINED_SHA256,
+    PROJECT_ROOT,
+    RAW_ROOT,
+    REC_ROOT,
+    REPORT_ROOT,
+    SPLITS,
+    TRAIN_CONFIG,
+    phase_export_dir,
+    phase_output_dir,
+)
 
-CONFIG_DIR = PROJECT_ROOT / "configs"
-TRAIN_CONFIG = CONFIG_DIR / "kurdish_rec.yml"
-# The filename must contain the substring "arabic": PaddleOCR's CTCLabelDecode enables
-# right-to-left reversal only when `if "arabic" in character_dict_path`
-# (ppocr/postprocess/rec_postprocess.py). Without it, validation accuracy during training
-# and every evaluation score Arabic script in visual order and look catastrophic.
-DICT_PATH = CONFIG_DIR / "arabic_kurdish_dict.txt"
-
-ASSETS_DIR = PROJECT_ROOT / "assets"
-BASE_MODEL_DIR = ASSETS_DIR / "base_rec_inference"
-BASE_PRETRAINED = PROJECT_ROOT / "pretrain_models" / "arabic_PP-OCRv5_mobile_rec_pretrained.pdparams"
-
-# Checksums of the two committed model files, so setup.ps1 and verify_env.py can tell a
-# truncated or half-copied download from a real one. Both are verified on every run.
-PRETRAINED_SHA256 = "67bfef7d6304fc05ad5846c65e2e4e2587218a2b1de1c46989d7abc1a7a2d855"
-BASE_INFERENCE_SHA256 = "4b4271fd1dd89a40b2056e1a42e58de7c0df2fdcf1a97ca9a8916d7ec45f9143"
-
-OUTPUT_ROOT = PROJECT_ROOT / "output"
-EXPORT_ROOT = PROJECT_ROOT / "export"
-REPORT_ROOT = PROJECT_ROOT / "reports"
-
-# PaddleOCR release this project is pinned to. setup.ps1 checks out exactly this commit.
-PADDLE_COMMIT = "2661c7c0ef5c613e8f93c6e93b2e052399f0f854"
-PADDLE_REPO = "https://github.com/PaddlePaddle/PaddleOCR.git"
-
-DATASET_REPO = "a7x3a/qai-ocr-v1-small"
-DATASET_REVISION = "main"
-
-SPLITS = ("train", "val", "test")
-
-# Maximum label length in the prepared dataset. PaddleOCR needs the CTC time steps
-# (image width 320 / 8 = 40) to exceed this, which they do. audit_dataset.py
-# fails the build if any label is longer, so this can never silently truncate.
-MAX_TEXT_LENGTH = 32
-
-PHASES = ("smoke", "pilot", "full")
-
-
-def phase_output_dir(phase: str) -> Path:
-    """Each pipeline phase gets its own directory so phases never clobber each other."""
-    if phase not in PHASES:
-        raise ValueError(f"Unknown phase {phase!r}; expected one of {PHASES}")
-    return OUTPUT_ROOT / f"kurdish_{phase}"
-
-
-def phase_export_dir(phase: str) -> Path:
-    if phase not in PHASES:
-        raise ValueError(f"Unknown phase {phase!r}; expected one of {PHASES}")
-    return EXPORT_ROOT / f"kurdish_{phase}"
+__all__ = [
+    "PROJECT_ROOT",
+    "PADDLE_ROOT",
+    "PADDLE_COMMIT",
+    "PADDLE_REPO",
+    "DATA_ROOT",
+    "RAW_ROOT",
+    "REC_ROOT",
+    "DATASET_REPO",
+    "DATASET_REVISION",
+    "SPLITS",
+    "MAX_TEXT_LENGTH",
+    "CONFIG_DIR",
+    "TRAIN_CONFIG",
+    "DICT_PATH",
+    "ASSETS_DIR",
+    "BASE_MODEL_DIR",
+    "PRETRAIN_DIR",
+    "BASE_PRETRAINED",
+    "BASE_PRETRAINED_URL",
+    "BASE_INFERENCE_URL",
+    "PRETRAINED_SHA256",
+    "BASE_INFERENCE_SHA256",
+    "OUTPUT_ROOT",
+    "EXPORT_ROOT",
+    "REPORT_ROOT",
+    "PHASES",
+    "phase_output_dir",
+    "phase_export_dir",
+]

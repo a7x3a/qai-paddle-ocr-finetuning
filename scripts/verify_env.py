@@ -108,7 +108,7 @@ def main() -> int:
         # but was compiled against 9.9, so it prints a "serious incompatible bug" warning
         # on every GPU call. Compared from package metadata rather than by running GPU code,
         # and reported as a non-fatal WARN so nobody mistakes it for a new problem.
-        # See requirements-training.txt for why the pin is kept.
+        # PaddlePaddle 3.3.1 pins cuDNN 9.5 in its wheel metadata.
         try:
             from importlib import metadata as importlib_metadata
 

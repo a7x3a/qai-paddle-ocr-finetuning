@@ -3,20 +3,19 @@
     Prepare a Windows machine to train and evaluate the Kurdish OCR model.
 
 .DESCRIPTION
-    Idempotent. Safe to re-run: each step is skipped when it is already correct, so this
-    doubles as a repair tool on a machine that was set up by an older version.
+    Idempotent and resilient: safe to re-run anytime. Automatically detects GPU/CPU,
+    installs matching PaddlePaddle wheels, clones PaddleOCR at the pinned commit,
+    downloads official pretrained base models, downloads dataset shards from Hugging Face,
+    extracts train/val/test splits, audits data, and verifies the full pipeline.
 
     Steps:
-      1. Create .venv (Python 3.9-3.12)
-      2. Install GPU PaddlePaddle, then the data and training requirements
-      3. Clone PaddleOCR and check out the exact pinned commit
-      4. Verify the committed base models against their checksums
-      5. Download the dataset from Hugging Face
-      6. Prepare train/val/test label files
-      7. Audit the prepared data and verify the environment
-
-    Use -SkipDataset on a machine that will only run inference, and -SkipPaddleInstall if
-    Paddle is already present and known-good.
+      1. Create or activate .venv (Python 3.9-3.12)
+      2. Detect GPU / CUDA and install optimal PaddlePaddle wheel
+      3. Clone PaddleOCR repository at the pinned commit
+      4. Install unified project dependencies (requirements.txt)
+      5. Download and verify official base models (PP-OCRv5)
+      6. Download and prepare Kurdish dataset from Hugging Face
+      7. Run deep environment and hardware verification
 
 .EXAMPLE
     .\scripts\setup.ps1
@@ -28,7 +27,8 @@ param(
     [switch]$SkipVenv,
     [switch]$SkipPaddleInstall,
     [switch]$SkipPaddleOcr,
-    [switch]$SkipDataset
+    [switch]$SkipDataset,
+    [switch]$CpuOnly
 )
 
 $ErrorActionPreference = 'Stop'
@@ -41,7 +41,7 @@ $paddleRoot = Get-QaiPaddleRoot
 $commit = '2661c7c0ef5c613e8f93c6e93b2e052399f0f854'
 $repo = 'https://github.com/PaddlePaddle/PaddleOCR.git'
 
-Write-QaiHeader 'Kurdish OCR setup'
+Write-QaiHeader 'Kurdish OCR Environment Setup'
 
 # ---------------------------------------------------------------- 1. virtualenv
 if ($SkipVenv) {
@@ -51,9 +51,19 @@ elseif (Test-Path $venvPython) {
     Write-QaiOk 'virtualenv already present'
 }
 else {
+    Write-QaiStep 'creating virtual environment .venv...'
     $launcher = Get-Command py -ErrorAction SilentlyContinue
-    if ($launcher) { & py -3.12 -m venv $venv }
-    else { & python -m venv $venv }
+    if ($launcher) {
+        $pyTarget = & py --list 2>$null | Select-String -Pattern "3\.(12|11|10)" | Select-Object -First 1
+        if ($pyTarget -match "-(\d+\.\d+)") {
+            & py -$($Matches[1]) -m venv $venv
+        } else {
+            & py -3 -m venv $venv
+        }
+    }
+    else {
+        & python -m venv $venv
+    }
     if (-not (Test-Path $venvPython)) { throw "venv creation failed; expected $venvPython" }
     Write-QaiOk 'created .venv'
 }
@@ -61,73 +71,91 @@ else {
 if (-not (Test-Path $venvPython)) { throw "no interpreter at $venvPython" }
 $python = $venvPython
 
-# Paddle and pip write notes to stderr during normal operation.
 $previousPreference = $ErrorActionPreference
 $ErrorActionPreference = 'Continue'
 
 try {
-    & $python -m pip install --upgrade pip --quiet
+    Write-QaiStep 'upgrading pip and setuptools...'
+    & $python -m pip install --upgrade pip setuptools wheel --quiet
     if ($LASTEXITCODE -ne 0) { throw 'failed to upgrade pip' }
     Write-QaiOk 'pip ready'
 
-    # ------------------------------------------------------------ 2. requirements
+    # ------------------------------------------------------------ 2. PaddlePaddle Installation
     if ($SkipPaddleInstall) {
         Write-QaiStep 'skipping Paddle install (-SkipPaddleInstall)'
     }
     else {
-        # PaddlePaddle GPU wheels are published on Paddle's own index, keyed by CUDA
-        # version, so it must be installed before the ordinary requirements.
-        Write-QaiStep 'installing paddlepaddle-gpu 3.3.1 (CUDA 12.6 wheel)...'
-        & $python -m pip install "paddlepaddle-gpu==3.3.1" `
-            --extra-index-url https://www.paddlepaddle.org.cn/packages/stable/cu126/ --quiet
-        if ($LASTEXITCODE -ne 0) { throw 'failed to install paddlepaddle-gpu' }
-        Write-QaiOk 'paddlepaddle-gpu installed'
+        $smi = Get-QaiNvidiaSmi
+        $cudaVer = 0
+        if ($smi -and (-not $CpuOnly)) {
+            $smiOut = & $smi 2>$null | Out-String
+            if ($smiOut -match "CUDA Version:\s*(\d+)\.(\d+)") {
+                $cudaVer = [float]"$($Matches[1]).$($Matches[2])"
+            }
+        }
+
+        if ($cudaVer -ge 12.0 -and (-not $CpuOnly)) {
+            Write-QaiStep "detected NVIDIA GPU with CUDA $cudaVer -> installing paddlepaddle-gpu 3.3.1 (cu126)..."
+            & $python -m pip install "paddlepaddle-gpu==3.3.1" `
+                --extra-index-url https://www.paddlepaddle.org.cn/packages/stable/cu126/ --quiet
+        }
+        elseif ($cudaVer -ge 11.0 -and (-not $CpuOnly)) {
+            Write-QaiStep "detected NVIDIA GPU with CUDA $cudaVer -> installing paddlepaddle-gpu 3.3.1 (cu118)..."
+            & $python -m pip install "paddlepaddle-gpu==3.3.1" `
+                --extra-index-url https://www.paddlepaddle.org.cn/packages/stable/cu118/ --quiet
+        }
+        else {
+            Write-QaiStep 'installing CPU-only paddlepaddle 3.3.1...'
+            & $python -m pip install "paddlepaddle==3.3.1" --quiet
+        }
+
+        if ($LASTEXITCODE -ne 0) { throw 'failed to install paddlepaddle' }
+        Write-QaiOk 'paddlepaddle installed successfully'
     }
 
-    foreach ($file in @('requirements-data.txt', 'requirements-training.txt')) {
-        Write-QaiStep "installing $file ..."
-        & $python -m pip install -r (Join-Path $projectRoot $file) --quiet
-        if ($LASTEXITCODE -ne 0) { throw "failed to install $file" }
-        Write-QaiOk "$file installed"
+    # ------------------------------------------------------------ 3. PaddleOCR Git Checkout
+    if ($SkipPaddleOcr) {
+        Write-QaiStep 'skipping PaddleOCR checkout (-SkipPaddleOcr)'
     }
+    elseif (Test-Path (Join-Path $paddleRoot '.git')) {
+        $current = (& git -C $paddleRoot rev-parse HEAD 2>$null)
+        if ($current -eq $commit) {
+            Write-QaiOk "PaddleOCR already at pinned commit $commit"
+        }
+        else {
+            Write-QaiStep "PaddleOCR is at $current; checking out pinned commit $commit"
+            & git -C $paddleRoot fetch --all --tags 2>$null
+            & git -C $paddleRoot checkout $commit
+            if ($LASTEXITCODE -ne 0) { throw "failed to check out $commit" }
+            Write-QaiOk "PaddleOCR pinned to $commit"
+        }
+    }
+    else {
+        Write-QaiStep "cloning PaddleOCR repository from $repo..."
+        & git clone $repo $paddleRoot
+        if ($LASTEXITCODE -ne 0) { throw "failed to clone $repo" }
+        & git -C $paddleRoot checkout $commit
+        if ($LASTEXITCODE -ne 0) { throw "failed to check out $commit" }
+        Write-QaiOk "PaddleOCR cloned and pinned to $commit"
+    }
+
+    # ------------------------------------------------------------ 4. Requirements
+    Write-QaiStep 'installing unified dependencies (requirements.txt)...'
+    & $python -m pip install -r (Join-Path $projectRoot 'requirements.txt') --quiet
+    if ($LASTEXITCODE -ne 0) { throw 'failed to install requirements.txt' }
+    Write-QaiOk 'requirements.txt installed successfully'
 }
 finally {
     $ErrorActionPreference = $previousPreference
 }
 
-# ---------------------------------------------------------------- 3. PaddleOCR
-if ($SkipPaddleOcr) {
-    Write-QaiStep 'skipping PaddleOCR checkout (-SkipPaddleOcr)'
-}
-elseif (Test-Path (Join-Path $paddleRoot '.git')) {
-    $current = (& git -C $paddleRoot rev-parse HEAD 2>$null)
-    if ($current -eq $commit) {
-        Write-QaiOk "PaddleOCR already at $commit"
-    }
-    else {
-        Write-QaiStep "PaddleOCR is at $current; checking out pinned $commit"
-        & git -C $paddleRoot fetch --all --tags
-        & git -C $paddleRoot checkout $commit
-        if ($LASTEXITCODE -ne 0) { throw "failed to check out $commit" }
-        Write-QaiOk "PaddleOCR pinned to $commit"
-    }
-}
-else {
-    Write-QaiStep "cloning PaddleOCR (this takes a few minutes)..."
-    & git clone $repo $paddleRoot
-    if ($LASTEXITCODE -ne 0) { throw "failed to clone $repo" }
-    & git -C $paddleRoot checkout $commit
-    if ($LASTEXITCODE -ne 0) { throw "failed to check out $commit" }
-    Write-QaiOk "PaddleOCR pinned to $commit"
-}
-
-# ---------------------------------------------------------------- 4. base models
-Write-QaiStep 'verifying base models...'
+# ---------------------------------------------------------------- 5. Base Models
+Write-QaiStep 'verifying / downloading official base models...'
 & $python (Join-Path $PSScriptRoot 'download_base_models.py')
 if ($LASTEXITCODE -ne 0) { throw 'base models check/download failed' }
-Write-QaiOk 'base models ready'
+Write-QaiOk 'official base models ready'
 
-# ---------------------------------------------------------------- 5-7. data
+# ---------------------------------------------------------------- 6. Dataset Download & Prep
 if ($SkipDataset) {
     Write-QaiStep 'skipping dataset download and preparation (-SkipDataset)'
 }
@@ -137,32 +165,39 @@ else {
         Write-QaiOk 'prepared dataset already present'
     }
     else {
-        Write-QaiStep 'downloading the dataset from Hugging Face (about 850 MB)...'
-        & $python (Join-Path $PSScriptRoot 'prepare_dataset.py')
+        Write-QaiStep 'downloading and preparing dataset from Hugging Face...'
+        & $python (Join-Path $PSScriptRoot 'prepare_dataset.py') --skip-if-exists
         if ($LASTEXITCODE -ne 0) { throw 'prepare_dataset.py failed' }
         Write-QaiOk 'dataset prepared'
     }
 
-    Write-QaiStep 'auditing the prepared dataset...'
+    Write-QaiStep 'auditing prepared dataset...'
     & $python (Join-Path $PSScriptRoot 'audit_dataset.py')
-    if ($LASTEXITCODE -ne 0) { throw 'audit_dataset.py failed; see the report above' }
+    if ($LASTEXITCODE -ne 0) { throw 'audit_dataset.py failed; inspect the output report above' }
     Write-QaiOk 'dataset audit passed'
 }
 
-# ---------------------------------------------------------------- verify
-Write-QaiHeader 'Verifying environment'
-& $python (Join-Path $PSScriptRoot 'verify_env.py') --require-data
-if ($LASTEXITCODE -ne 0) { throw 'verification failed; fix the reported problems and re-run setup.ps1' }
+# ---------------------------------------------------------------- 7. Deep Verification
+Write-QaiHeader 'Verifying Environment'
+$verifyArgs = @((Join-Path $PSScriptRoot 'verify_env.py'))
+if (-not $SkipDataset) { $verifyArgs += '--require-data' }
+& $python @verifyArgs
+if ($LASTEXITCODE -ne 0) { throw 'environment verification failed' }
 
 $hardware = Get-QaiHardwareProfile
 Write-Host ''
-Write-QaiHeader 'Ready'
-Write-Host "  gpu        $($hardware.GpuName) ($($hardware.GpuMemoryMB) MB)" -ForegroundColor DarkGray
-Write-Host "  cpu / ram  $($hardware.CpuCores) cores / $($hardware.RamGB) GB" -ForegroundColor DarkGray
-Write-Host "  batch      $($hardware.RecommendedBatch)   workers $($hardware.RecommendedWorkers)" -ForegroundColor DarkGray
+Write-QaiHeader 'Setup Complete & Ready'
+Write-Host "  GPU Compute : $($hardware.GpuName) ($($hardware.GpuMemoryMB) MB)" -ForegroundColor Green
+Write-Host "  CPU / RAM   : $($hardware.CpuCores) cores / $($hardware.RamGB) GB" -ForegroundColor DarkGray
+Write-Host "  Batch Size  : $($hardware.RecommendedBatch) (Train) / $($hardware.RecommendedEvalBatch) (Eval)" -ForegroundColor DarkCyan
+Write-Host "  Workers     : $($hardware.RecommendedWorkers)" -ForegroundColor DarkCyan
 Write-Host ''
-Write-Host '  next steps:' -ForegroundColor Cyan
-Write-Host '    .\scripts\train.ps1 -Phase smoke      # fast correctness check' -ForegroundColor DarkGray
-Write-Host '    .\scripts\train.ps1 -Phase pilot      # full data, short run' -ForegroundColor DarkGray
-Write-Host '    .\scripts\train.ps1 -Phase full       # the real run' -ForegroundColor DarkGray
+Write-Host '  Suggested Workflow Commands:' -ForegroundColor Cyan
+Write-Host '    python main.py smoke-test                           # Verify GPU, VRAM & gradient pass' -ForegroundColor White
+Write-Host '    python main.py benchmark-base --max-samples 100     # Zero-shot baseline benchmark' -ForegroundColor White
+Write-Host '    python main.py pilot-run --num-samples 500          # Rapid 2-epoch mini convergence test' -ForegroundColor White
+Write-Host '    python main.py train --epochs 40                    # Full production fine-tuning' -ForegroundColor White
+Write-Host '    python main.py export                               # Export trained model for deployment' -ForegroundColor White
+Write-Host '    python main.py infer --split test --count 5         # Run inference on test samples' -ForegroundColor White
+Write-Host ''
 exit 0

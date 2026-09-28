@@ -10,46 +10,37 @@ from typing import Any, Dict, Optional, Union
 import paddle
 import yaml
 
+from .hardware import get_hardware_profile
 from .logger import setup_logger
 
 logger = setup_logger("ConfigInjector")
 
 
 def auto_detect_gpu_batch_size(vram_gb: Optional[float] = None) -> int:
-    """Determine optimal training batch size based on available CUDA VRAM.
+    """Determine optimal training batch size based on available compute hardware.
 
     Prevents Out-Of-Memory (OOM) failures while maximizing tensor throughput.
 
     Args:
-        vram_gb: Explicit GPU memory in gigabytes. If None, queries active CUDA device.
+        vram_gb: Explicit GPU memory in gigabytes. If None, queries hardware profile.
 
     Returns:
-        Recommended batch size integer (e.g. 32, 64, 128, 256, 384).
+        Recommended batch size integer (multiple of 16 for MultiScaleSampler).
     """
-    if vram_gb is None:
-        if paddle.is_compiled_with_cuda() and paddle.device.cuda.device_count() > 0:
-            try:
-                # Query device 0 memory capability
-                dev_id = 0
-                props = paddle.device.cuda.get_device_properties(dev_id)
-                # Total memory in bytes to GB
-                total_bytes = getattr(props, "total_memory", 0)
-                vram_gb = total_bytes / (1024.0 ** 3)
-            except Exception:
-                vram_gb = 6.0
+    if vram_gb is not None:
+        if vram_gb < 4.0:
+            return 32
+        elif vram_gb < 6.0:
+            return 64
+        elif vram_gb < 8.0:
+            return 128
+        elif vram_gb < 12.0:
+            return 256
         else:
-            return 16  # CPU fallback
+            return 384
 
-    if vram_gb < 4.0:
-        return 32
-    elif vram_gb < 6.0:
-        return 64
-    elif vram_gb < 8.0:
-        return 128
-    elif vram_gb < 12.0:
-        return 256
-    else:
-        return 384
+    profile = get_hardware_profile()
+    return profile.recommended_train_batch
 
 
 class PaddleConfigInjector:

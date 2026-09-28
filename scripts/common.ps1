@@ -62,12 +62,13 @@ function Get-QaiHardwareProfile {
     }
 
     if ($gpuMemoryMB -le 0) {
-        $batch = 8
+        $batch = 16
     }
     else {
         $batch = [int][math]::Floor(($gpuMemoryMB * 0.75) / 11.6)
     }
     $batch = [math]::Max(16, ([math]::Floor($batch / 16) * 16))
+    $evalBatch = [math]::Min(96, $batch)
 
     # More loader workers than the CPU count stops helping once the disk read saturates
     # (measured: 8 workers beat 12, which only added contention, and at batch 384
@@ -79,13 +80,14 @@ function Get-QaiHardwareProfile {
     $workers = [math]::Min($cpuCap, $ramCap)
 
     return [pscustomobject]@{
-        CpuCores            = $cpu
-        RamGB               = $ramGB
-        FreeRamGB           = $freeRamGB
-        GpuName             = $gpuName
-        GpuMemoryMB         = $gpuMemoryMB
-        RecommendedBatch    = $batch
-        RecommendedWorkers  = $workers
+        CpuCores               = $cpu
+        RamGB                  = $ramGB
+        FreeRamGB              = $freeRamGB
+        GpuName                = $gpuName
+        GpuMemoryMB            = $gpuMemoryMB
+        RecommendedBatch       = $batch
+        RecommendedEvalBatch   = $evalBatch
+        RecommendedWorkers     = $workers
     }
 }
 

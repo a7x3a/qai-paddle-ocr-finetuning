@@ -1,25 +1,26 @@
-.PHONY: help install prepare smoke benchmark_base pilot train report clean
+.PHONY: help setup prepare smoke benchmark_base pilot train export report infer clean
 
 PYTHON ?= python
 
 help:
 	@echo "================================================================================"
-	@echo " PaddleOCR Recognition Fine-Tuning Pipeline (Production HPC / Kurdish MLOps)    "
+	@echo " PaddleOCR Recognition Fine-Tuning Pipeline (Kurdish Production HPC / MLOps)   "
 	@echo "================================================================================"
 	@echo "Targets:"
-	@echo "  install        Install repository dependencies from requirements.txt"
-	@echo "  prepare        Preprocess raw annotations, crop polygons, build dictionary"
+	@echo "  setup          Automated setup of PaddleOCR, dependencies, models & dataset"
+	@echo "  prepare        Download dataset from Hugging Face & extract shards to data/"
 	@echo "  smoke          Run environment, CUDA, VRAM, and gradient smoke test"
 	@echo "  benchmark_base Benchmark un-finetuned baseline foundation model"
 	@echo "  pilot          Execute pilot convergence run and quick evaluation"
 	@echo "  train          Run production fine-tuning on complete dataset"
+	@echo "  export         Export best checkpoint to deployable inference model"
 	@echo "  report         Benchmark all saved checkpoints and generate leaderboard"
+	@echo "  infer          Run inference on sample images with ground-truth comparison"
 	@echo "  clean          Remove temporary runtime artifacts and Python caches"
 	@echo "================================================================================"
 
-install:
-	$(PYTHON) -m pip install -U pip
-	$(PYTHON) -m pip install -r requirements.txt
+setup:
+	$(PYTHON) main.py setup
 
 prepare:
 	$(PYTHON) main.py prepare-data

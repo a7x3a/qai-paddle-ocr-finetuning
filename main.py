@@ -37,6 +37,50 @@ def _resolve_default_path(*candidates: str) -> str:
     return candidates[0] if candidates else ""
 
 
+def handle_setup(args: argparse.Namespace) -> None:
+    """Execute automated environment setup across Windows, Linux, and Google Colab."""
+    import subprocess
+    from src.utils.hardware import get_hardware_profile
+    from src.utils.paths import PADDLE_COMMIT, PADDLE_REPO, PADDLE_ROOT, PROJECT_ROOT
+
+    logger.info("Executing automated environment setup...")
+    profile = get_hardware_profile()
+    logger.info(f"Compute Hardware: {profile.gpu_name} ({profile.gpu_memory_mb} MB VRAM, {profile.cpu_cores} CPU cores)")
+
+    # 1. Clone / checkout pinned PaddleOCR
+    if not (PADDLE_ROOT / ".git").is_dir():
+        logger.info(f"Cloning PaddleOCR repository from {PADDLE_REPO}...")
+        subprocess.run(["git", "clone", PADDLE_REPO, str(PADDLE_ROOT)], check=True)
+        subprocess.run(["git", "-C", str(PADDLE_ROOT), "checkout", PADDLE_COMMIT], check=True)
+        logger.info(f"PaddleOCR checked out at pinned commit: {PADDLE_COMMIT}")
+    else:
+        logger.info(f"PaddleOCR repository already present at: {PADDLE_ROOT}")
+
+    # 2. Base models
+    logger.info("Verifying / downloading official base models...")
+    from scripts.download_base_models import ensure_base_models
+    ensure_base_models()
+
+    # 3. Dataset preparation
+    if not args.skip_dataset:
+        logger.info("Verifying / downloading and extracting Kurdish dataset from Hugging Face...")
+        processor = DatasetProcessor()
+        processor.process_webdataset(
+            input_dir="data/qai-ocr-v1-small",
+            output_dir="./data/kurdish_rec",
+            max_text_length=32,
+            overwrite=args.force_data,
+        )
+
+    # 4. Verify environment
+    logger.info("Running deep environment verification...")
+    verify_args = [sys.executable, "scripts/verify_env.py"]
+    if not args.skip_dataset:
+        verify_args.append("--require-data")
+    subprocess.run(verify_args, check=True)
+    logger.info("Environment setup completed successfully!")
+
+
 def handle_prepare_data(args: argparse.Namespace) -> None:
     """Execute dataset transformation, WebDataset shard extraction, or polygon perspective cropping."""
     logger.info("Starting dataset preprocessing pipeline...")
@@ -217,6 +261,13 @@ def handle_train(args: argparse.Namespace) -> None:
     output_dir = Path(args.output_dir).resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    batch_size = args.batch_size
+    if batch_size is None:
+        from src.utils.hardware import get_hardware_profile
+        profile = get_hardware_profile()
+        batch_size = profile.recommended_train_batch
+        logger.info(f"Auto-selected hardware-optimized batch size: {batch_size} (Device: {profile.gpu_name})")
+
     injector = PaddleConfigInjector(args.config)
     injector.inject_runtime_paths(
         character_dict_path=args.dict_path,
@@ -224,7 +275,7 @@ def handle_train(args: argparse.Namespace) -> None:
         val_label_path=args.val_label,
         save_model_dir=output_dir / "checkpoints",
         pretrained_model_path=args.pretrained_model,
-        batch_size=args.batch_size,
+        batch_size=batch_size,
         epoch_num=args.epochs,
         learning_rate=args.lr,
     )
@@ -292,6 +343,12 @@ def main() -> None:
         "export/pilot_test",
         "assets/base_rec_inference",
     )
+
+    # 0. setup
+    p_setup = subparsers.add_parser("setup", help="Automated setup of PaddleOCR, dependencies, base models & dataset")
+    p_setup.add_argument("--skip-dataset", action="store_true", help="Skip dataset download/preparation")
+    p_setup.add_argument("--force-data", action="store_true", help="Force re-extraction of dataset")
+    p_setup.set_defaults(func=handle_setup)
 
     # 1. prepare-data
     p_prep = subparsers.add_parser("prepare-data", help="Extract WebDataset shards or parse JSONL annotations")

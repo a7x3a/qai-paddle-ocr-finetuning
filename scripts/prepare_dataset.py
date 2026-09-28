@@ -54,6 +54,24 @@ from PIL import Image
 IMAGE_SUFFIXES = (".jpg", ".jpeg", ".png", ".bmp", ".webp")
 
 
+def ensure_raw_dataset(input_dir: Path, repo_id: str = DATASET_REPO) -> None:
+    """Ensure raw dataset shards exist locally. If missing, download from Hugging Face."""
+    has_shards = any(input_dir.glob("*/*.tar")) or any(input_dir.glob("*.tar"))
+    if not has_shards:
+        print(f"[*] Raw dataset shards not found at {input_dir}.", flush=True)
+        print(f"[*] Downloading '{repo_id}' from Hugging Face Hub (approx. 850 MB)...", flush=True)
+        from huggingface_hub import snapshot_download
+
+        input_dir.mkdir(parents=True, exist_ok=True)
+        snapshot_download(
+            repo_id=repo_id,
+            repo_type="dataset",
+            local_dir=str(input_dir),
+            allow_patterns=["*.tar", "*.jsonl", "*.json", "*.md"],
+        )
+        print(f"[+] Hugging Face download complete: {input_dir}", flush=True)
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--input", type=Path, default=RAW_ROOT, help="Downloaded dataset root")
@@ -63,6 +81,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--jobs", type=int, default=0, help="Worker processes (default: min(cpu, 8))")
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument("--skip-dictionary", action="store_true")
+    parser.add_argument("--skip-if-exists", action="store_true", help="Skip if dataset is already prepared")
     return parser.parse_args()
 
 
@@ -163,12 +182,25 @@ def main() -> int:
     args = parse_args()
     jobs = args.jobs or min(8, (__import__("os").cpu_count() or 4))
 
+    # Fast skip if dataset is already prepared
+    train_rec = args.output / "train_rec.txt"
+    val_rec = args.output / "val_rec.txt"
+    if args.skip_if_exists and train_rec.is_file() and val_rec.is_file():
+        print(f"[OK] Prepared dataset already exists at {args.output}. Skipping extraction.")
+        return 0
+
     if args.output.exists() and any(args.output.iterdir()):
         if not args.overwrite:
+            if train_rec.is_file():
+                print(f"[OK] Prepared dataset already exists at {args.output}. Use --overwrite to re-extract.", flush=True)
+                return 0
             print(f"error: {args.output} is not empty. Re-run with --overwrite.", file=sys.stderr)
             return 2
         shutil.rmtree(args.output)
     args.output.mkdir(parents=True, exist_ok=True)
+
+    # Automatically ensure raw dataset exists (download from Hugging Face if needed)
+    ensure_raw_dataset(args.input)
 
     summary: dict = {"dataset": DATASET_REPO, "max_text_length": args.max_text_length, "splits": {}}
     all_characters: Counter[str] = Counter()
@@ -177,7 +209,7 @@ def main() -> int:
     for split in SPLITS:
         split_root = args.input / split
         if not split_root.is_dir():
-            print(f"error: missing {split_root}. Download the dataset first.", file=sys.stderr)
+            print(f"error: missing {split_root} after downloading dataset.", file=sys.stderr)
             return 2
         shards = sorted(split_root.glob("shard-*.tar"))
         if not shards:
