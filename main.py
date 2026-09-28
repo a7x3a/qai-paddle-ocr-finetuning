@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import argparse
+import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -11,6 +13,15 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
+
+# Self-healing: if running with external/system interpreter and a local .venv exists, re-launch under .venv
+_target_venv = (
+    PROJECT_ROOT / ".venv" / "Scripts" / "python.exe"
+    if os.name == "nt"
+    else PROJECT_ROOT / ".venv" / "bin" / "python"
+)
+if _target_venv.is_file() and Path(sys.executable).resolve() != _target_venv.resolve():
+    sys.exit(subprocess.call([str(_target_venv), str(Path(__file__).resolve())] + sys.argv[1:]))
 
 # Also ensure PaddleOCR repository directory is accessible
 if (PROJECT_ROOT / "PaddleOCR").is_dir() and str(PROJECT_ROOT / "PaddleOCR") not in sys.path:

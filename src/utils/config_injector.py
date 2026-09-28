@@ -71,6 +71,7 @@ class PaddleConfigInjector:
         epoch_num: Optional[int] = None,
         learning_rate: Optional[float] = None,
         max_text_length: int = 40,
+        use_gpu: Optional[bool] = None,
     ) -> dict[str, Any]:
         """Inject runtime paths and hardware-adaptive parameters into the configuration.
 
@@ -85,6 +86,7 @@ class PaddleConfigInjector:
             epoch_num: Optional override for total training epochs.
             learning_rate: Optional override for initial learning rate.
             max_text_length: Maximum sequence length for recognition heads.
+            use_gpu: Whether to enforce GPU training (None for auto-detect).
 
         Returns:
             Updated configuration dictionary.
@@ -114,6 +116,15 @@ class PaddleConfigInjector:
         cfg["Global"]["max_text_length"] = max_text_length
         cfg["Global"]["save_res_path"] = str(save_dir_p / "predicts.txt")
         cfg["Global"]["save_inference_dir"] = str(save_dir_p / "inference")
+
+        # Determine compute device
+        has_cuda = bool(paddle.is_compiled_with_cuda() and paddle.device.cuda.device_count() > 0)
+        gpu_enabled = has_cuda if use_gpu is None else bool(use_gpu)
+        cfg["Global"]["use_gpu"] = gpu_enabled
+        if not gpu_enabled:
+            cfg["Global"]["amp_level"] = "O0"
+        elif "amp_level" not in cfg["Global"]:
+            cfg["Global"]["amp_level"] = "O2"
 
         if pretrained_model_path:
             clean_pretrained = str(Path(pretrained_model_path).resolve())

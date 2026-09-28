@@ -103,8 +103,11 @@ class PaddleTrainer:
             ]
 
         logger.info(f"Initiating training process with command: {' '.join(cmd)}")
+        import paddle
         env = os.environ.copy()
-        env["CUDA_VISIBLE_DEVICES"] = gpus
+        has_cuda = bool(paddle.is_compiled_with_cuda() and paddle.device.cuda.device_count() > 0)
+        if has_cuda and gpus:
+            env["CUDA_VISIBLE_DEVICES"] = gpus
         env["PYTHONPATH"] = f"{str(self.paddleocr_dir)}{os.pathsep}{env.get('PYTHONPATH', '')}"
 
         process = subprocess.Popen(

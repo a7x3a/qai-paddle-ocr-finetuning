@@ -20,7 +20,11 @@ function Get-QaiPaddleRoot {
 }
 
 function Get-QaiNvidiaGpu {
-    return (Get-CimInstance Win32_VideoController -ErrorAction SilentlyContinue | Where-Object { $_.Name -like "*NVIDIA*" -or $_.Caption -like "*NVIDIA*" } | Select-Object -First 1)
+    $gpu = Get-CimInstance Win32_VideoController -ErrorAction SilentlyContinue | Where-Object { $_.Name -like "*NVIDIA*" -or $_.Caption -like "*NVIDIA*" } | Select-Object -First 1
+    if (-not $gpu) {
+        $gpu = Get-WmiObject Win32_VideoController -ErrorAction SilentlyContinue | Where-Object { $_.Name -like "*NVIDIA*" -or $_.Caption -like "*NVIDIA*" } | Select-Object -First 1
+    }
+    return $gpu
 }
 
 function Get-QaiNvidiaSmi {
@@ -31,10 +35,18 @@ function Get-QaiNvidiaSmi {
         'C:\Program Files\NVIDIA Corporation\NVSMI\nvidia-smi.exe'
     )
     foreach ($c in $candidates) {
-        if (Test-Path $c) { return $c }
+        if (Test-Path $c) {
+            $dir = Split-Path -Parent $c
+            if ($env:PATH -notlike "*$dir*") { $env:PATH = "$dir;$env:PATH" }
+            return $c
+        }
     }
     $driverStore = Get-ChildItem "C:\Windows\System32\DriverStore\FileRepository\*\nvidia-smi.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($driverStore) { return $driverStore.FullName }
+    if ($driverStore) {
+        $dir = Split-Path -Parent $driverStore.FullName
+        if ($env:PATH -notlike "*$dir*") { $env:PATH = "$dir;$env:PATH" }
+        return $driverStore.FullName
+    }
     return $null
 }
 

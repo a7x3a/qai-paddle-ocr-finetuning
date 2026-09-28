@@ -48,6 +48,20 @@ if ($SkipVenv) {
     Write-QaiStep 'skipping virtualenv creation (-SkipVenv)'
 }
 else {
+    # Check MSVC runtime on Windows
+    $vcRuntime = Join-Path $env:SystemRoot 'System32\vcruntime140.dll'
+    if (-not (Test-Path $vcRuntime)) {
+        Write-Host "  [!] Microsoft Visual C++ 2015-2022 Redistributable (x64) is missing." -ForegroundColor Yellow
+        $winget = Get-Command winget -ErrorAction SilentlyContinue
+        if ($winget) {
+            Write-QaiStep "Installing Visual C++ Redistributable via winget..."
+            & winget install Microsoft.VCRedist.2015+.x64 --silent --accept-package-agreements --accept-source-agreements 2>$null
+        }
+    }
+
+    # Enable Git long paths to prevent path length issues
+    & git config --global core.longpaths true 2>$null
+
     if (Test-Path $venvPython) {
         $existingVer = (& $venvPython -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}|{sys.maxsize > 2**32}')" 2>$null)
         if ($existingVer) {
@@ -87,8 +101,37 @@ else {
                 }
             }
         }
+        if (-not $found) {
+            $winget = Get-Command winget -ErrorAction SilentlyContinue
+            if ($winget) {
+                Write-Host "  -> Compatible 64-bit Python 3.10-3.12 not found on this PC." -ForegroundColor Yellow
+                Write-Host "  -> Attempting automated installation of Python 3.12 via winget..." -ForegroundColor Cyan
+                & winget install Python.Python.3.12 --scope currentuser --silent --accept-package-agreements --accept-source-agreements
+                $userPath = [System.Environment]::GetEnvironmentVariable("Path", "User")
+                $machinePath = [System.Environment]::GetEnvironmentVariable("Path", "Machine")
+                $env:Path = "$userPath;$machinePath"
+
+                $probe = & py -3.12 -c "import sys; print(sys.maxsize > 2**32)" 2>$null
+                if ($LASTEXITCODE -eq 0 -and $probe.Trim() -eq "True") {
+                    Write-QaiStep "Creating .venv using freshly installed 64-bit Python 3.12..."
+                    & py -3.12 -m venv $venv
+                    $found = $true
+                }
+            }
+        }
         if (-not (Test-Path $venvPython)) {
-            throw "PaddlePaddle requires 64-bit Python 3.10, 3.11, or 3.12 (Python 3.13 is not supported yet). Please install Python 3.12 64-bit from: https://www.python.org/downloads/release/python-3129/"
+            Write-Host ""
+            Write-Host "========================================================================" -ForegroundColor Red
+            Write-Host " [FATAL] Compatible 64-bit Python 3.10-3.12 is required" -ForegroundColor Red
+            Write-Host "========================================================================" -ForegroundColor Red
+            Write-Host " PaddlePaddle 3.3.1 currently supports 64-bit Python 3.10, 3.11, or 3.12." -ForegroundColor White
+            Write-Host " Python 3.13 and 32-bit versions are not yet supported by PaddlePaddle." -ForegroundColor Yellow
+            Write-Host ""
+            Write-Host " Quick Fix: Open PowerShell and run:" -ForegroundColor Cyan
+            Write-Host "   winget install Python.Python.3.12" -ForegroundColor Green
+            Write-Host " Or download from: https://www.python.org/downloads/release/python-3129/" -ForegroundColor White
+            Write-Host "========================================================================" -ForegroundColor Red
+            throw "PaddlePaddle requires 64-bit Python 3.10-3.12"
         }
         Write-QaiOk 'created .venv'
     }
@@ -102,7 +145,7 @@ $ErrorActionPreference = 'Continue'
 
 try {
     Write-QaiStep 'upgrading pip and setuptools...'
-    & $python -m pip install --upgrade pip setuptools wheel --quiet
+    & $python -m pip install --upgrade pip setuptools wheel --timeout 120 --retries 5 --quiet
     if ($LASTEXITCODE -ne 0) { throw 'failed to upgrade pip' }
     Write-QaiOk 'pip ready'
 
@@ -125,18 +168,21 @@ try {
                 }
             }
 
+            # Remove CPU paddlepaddle to avoid namespace collision
+            & $python -m pip uninstall -y paddlepaddle 2>$null
+
             if ($cudaVer -lt 12.0 -and $cudaVer -ge 11.0) {
                 Write-QaiStep "Detected $gpuTitle (CUDA $cudaVer) -> installing paddlepaddle-gpu (cu118)..."
                 & $python -m pip install "paddlepaddle-gpu==3.3.1" `
-                    --extra-index-url https://www.paddlepaddle.org.cn/packages/stable/cu118/
+                    --extra-index-url https://www.paddlepaddle.org.cn/packages/stable/cu118/ --timeout 120 --retries 5
             } else {
                 Write-QaiStep "Detected $gpuTitle (CUDA $cudaVer) -> installing paddlepaddle-gpu (cu126)..."
                 & $python -m pip install "paddlepaddle-gpu==3.3.1" `
-                    --extra-index-url https://www.paddlepaddle.org.cn/packages/stable/cu126/
+                    --extra-index-url https://www.paddlepaddle.org.cn/packages/stable/cu126/ --timeout 120 --retries 5
                 if ($LASTEXITCODE -ne 0) {
                     Write-QaiStep "cu126 installation retry with cu118..."
                     & $python -m pip install "paddlepaddle-gpu==3.3.1" `
-                        --extra-index-url https://www.paddlepaddle.org.cn/packages/stable/cu118/
+                        --extra-index-url https://www.paddlepaddle.org.cn/packages/stable/cu118/ --timeout 120 --retries 5
                 }
             }
 
@@ -145,7 +191,9 @@ try {
         }
         else {
             Write-QaiStep 'installing CPU-only paddlepaddle 3.3.1...'
-            & $python -m pip install "paddlepaddle==3.3.1"
+            # Remove GPU paddlepaddle if present
+            & $python -m pip uninstall -y paddlepaddle-gpu 2>$null
+            & $python -m pip install "paddlepaddle==3.3.1" --timeout 120 --retries 5
             if ($LASTEXITCODE -ne 0) { throw 'failed to install paddlepaddle' }
             Write-QaiOk 'paddlepaddle installed successfully'
         }
