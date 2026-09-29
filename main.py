@@ -43,6 +43,8 @@ if (PROJECT_ROOT / "PaddleOCR").is_dir() and str(PROJECT_ROOT / "PaddleOCR") not
 
 from src.benchmark.engine import BenchmarkEngine
 from src.data.processor import DatasetProcessor
+from src.pipeline.benchmarking_reporter import BenchmarkingReporter, resolve_report_dir
+from src.pipeline.document_reader import DocumentReader
 from src.pipeline.exporter import ModelExporter
 from src.pipeline.pilot_run import PilotRunner
 from src.pipeline.smoke_test import SmokeTester
@@ -189,15 +191,70 @@ def handle_prepare_data(args: argparse.Namespace) -> None:
 
 
 def handle_export(args: argparse.Namespace) -> None:
-    """Export trained checkpoint to deployable PaddleOCR inference format."""
+    """Export trained checkpoint to deployable PaddleOCR inference format with version control."""
     logger.info("Exporting model checkpoint to inference format...")
+
+    # Smart checkpoint resolution:
+    ckpt_raw = args.checkpoint
+    ckpt_p = Path(ckpt_raw)
+    if not ckpt_p.exists() and not Path(f"{ckpt_raw}.pdparams").exists():
+        candidates = [
+            Path(f"output/production_run/checkpoints/{ckpt_raw}"),
+            Path(f"output/production_run/checkpoints/{ckpt_raw}.pdparams"),
+        ]
+        if getattr(args, "version", None):
+            v_tag = f"v{str(args.version).lstrip('v')}"
+            candidates.extend([
+                Path(f"output/{v_tag}/production_run/checkpoints/{ckpt_raw}"),
+                Path(f"output/{v_tag}/production_run/checkpoints/{ckpt_raw}.pdparams"),
+            ])
+        for c in candidates:
+            if c.exists() or Path(f"{c}.pdparams").exists():
+                ckpt_p = c
+                break
+
     exporter = ModelExporter()
-    out_dir = exporter.export(
-        checkpoint_path=args.checkpoint,
-        config_path=args.config,
-        output_dir=args.output_dir,
-        dict_path=args.dict_path,
+    version_tag = getattr(args, "version", None)
+
+    if version_tag is not None:
+        v_num = str(version_tag).lstrip("v")
+        export_v_dir = Path(f"./export/v{v_num}").resolve()
+        out_dir = exporter.export(
+            checkpoint_path=ckpt_p,
+            config_path=args.config,
+            output_dir=export_v_dir,
+            dict_path=args.dict_path,
+        )
+        # Mirror to active default kurdish_final
+        exporter.export(
+            checkpoint_path=ckpt_p,
+            config_path=args.config,
+            output_dir=Path("./export/kurdish_final").resolve(),
+            dict_path=args.dict_path,
+        )
+    else:
+        out_dir = exporter.export(
+            checkpoint_path=ckpt_p,
+            config_path=args.config,
+            output_dir=args.output_dir,
+            dict_path=args.dict_path,
+        )
+
+    # Render beautiful summary card
+    files_exported = [f.name for f in out_dir.iterdir() if f.is_file()]
+    card = Visualizer.render_card(
+        title="📦 PADDLEOCR MODEL EXPORT COMPLETED",
+        items=[
+            ("Target Directory", str(out_dir)),
+            ("Source Checkpoint", str(ckpt_p)),
+            ("Exported Files", ", ".join(files_exported)),
+            ("Version Tag", f"v{version_tag}" if version_tag else "Active (kurdish_final)"),
+            ("Status", "READY FOR HIGH-THROUGHPUT PRODUCTION INFERENCE"),
+            ("Quick OCR Test", f"python main.py infer --model-dir {out_dir} --split test --count 5"),
+            ("Read Book / PDF", f"python main.py read --input path/to/book.pdf --model-dir {out_dir}"),
+        ],
     )
+    print("\n" + card + "\n")
     logger.info(f"Model exported successfully to: {out_dir}")
 
 
@@ -314,6 +371,23 @@ def handle_benchmark_base(args: argparse.Namespace) -> None:
     ]
     print("\n" + Visualizer.render_table(table_data) + "\n")
 
+    if getattr(args, "version", None) is not None:
+        reporter = BenchmarkingReporter(version=args.version)
+        metrics = {
+            "checkpoint_path": str(Path(args.model_path).resolve()),
+            "total_samples": res.total_samples,
+            "exact_matches": res.exact_matches,
+            "accuracy": res.accuracy,
+            "macro_cer": res.macro_cer,
+            "micro_cer": res.micro_cer,
+            "macro_wer": res.macro_wer,
+            "micro_wer": res.micro_wer,
+            "avg_latency_ms": res.avg_latency_ms,
+            "throughput_fps": res.throughput_fps,
+            "total_time_sec": res.total_time_sec,
+        }
+        reporter.record_baseline(metrics, model_name=Path(args.model_path).stem)
+
 
 def handle_pilot_run(args: argparse.Namespace) -> None:
     """Execute rapid convergence pilot run on a mini subset."""
@@ -331,6 +405,19 @@ def handle_pilot_run(args: argparse.Namespace) -> None:
     )
     logger.info(f"Pilot run successfully concluded: {result}")
 
+    if getattr(args, "version", None) is not None:
+        reporter = BenchmarkingReporter(version=args.version)
+        pilot_json = Path(args.output_dir) / "pilot_benchmark_report.json"
+        if pilot_json.is_file():
+            import json
+            with open(pilot_json, "r", encoding="utf-8") as f:
+                p_metrics = json.load(f)
+            reporter.record_pilot(
+                p_metrics,
+                config_path=Path(args.output_dir) / "pilot_runtime_config.yml",
+                train_label_path=Path(args.output_dir) / "pilot_train_label.txt",
+            )
+
 
 def handle_train(args: argparse.Namespace) -> None:
     """Execute full fine-tuning training and auto-benchmark generated checkpoints."""
@@ -339,11 +426,13 @@ def handle_train(args: argparse.Namespace) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     batch_size = args.batch_size
+    from src.utils.hardware import get_hardware_profile
+    profile = get_hardware_profile()
     if batch_size is None:
-        from src.utils.hardware import get_hardware_profile
-        profile = get_hardware_profile()
         batch_size = profile.recommended_train_batch
         logger.info(f"Auto-selected hardware-optimized batch size: {batch_size} (Device: {profile.gpu_name})")
+
+    workers = getattr(args, "workers", None)
 
     injector = PaddleConfigInjector(args.config)
     injector.inject_runtime_paths(
@@ -353,6 +442,7 @@ def handle_train(args: argparse.Namespace) -> None:
         save_model_dir=output_dir / "checkpoints",
         pretrained_model_path=args.pretrained_model,
         batch_size=batch_size,
+        num_workers=workers,
         epoch_num=args.epochs,
         learning_rate=args.lr,
     )
@@ -360,7 +450,7 @@ def handle_train(args: argparse.Namespace) -> None:
     injector.write_runtime_config(runtime_config_path)
 
     trainer = PaddleTrainer()
-    trainer.run_training(
+    benchmarks = trainer.run_training(
         config_path=runtime_config_path,
         val_label_path=args.val_label,
         dict_path=args.dict_path,
@@ -369,17 +459,285 @@ def handle_train(args: argparse.Namespace) -> None:
         auto_benchmark=True,
     )
 
+    if getattr(args, "version", None) is not None:
+        reporter = BenchmarkingReporter(version=args.version)
+        reporter.record_full_checkpoints(
+            checkpoints_dir=output_dir / "checkpoints",
+            benchmark_results=benchmarks,
+        )
+
 
 def handle_benchmark_all(args: argparse.Namespace) -> None:
     """Discover and benchmark all checkpoints in the given directory."""
     logger.info(f"Scanning for checkpoints in: {args.checkpoints_dir}")
     trainer = PaddleTrainer()
-    trainer.evaluate_all_checkpoints(
+    benchmarks = trainer.evaluate_all_checkpoints(
         checkpoints_dir=args.checkpoints_dir,
         config_path=args.config,
         val_label_path=args.val_label,
         dict_path=args.dict_path,
         max_samples=args.max_samples,
+    )
+    if getattr(args, "version", None) is not None:
+        reporter = BenchmarkingReporter(version=args.version)
+        reporter.record_full_checkpoints(
+            checkpoints_dir=args.checkpoints_dir,
+            benchmark_results=benchmarks,
+        )
+
+
+def handle_benchmark_unseen(args: argparse.Namespace) -> None:
+    """Benchmark exported model or checkpoint against unseen test data across linguistic categories."""
+    logger.info("Starting unseen dataset cross-lingual evaluation...")
+    from src.benchmark.unseen_evaluator import UnseenEvaluator
+
+    evaluator = UnseenEvaluator(
+        model_dir=args.model_dir,
+        batch_size=args.batch_size,
+        use_gpu=not args.no_gpu,
+    )
+    report = evaluator.evaluate(
+        test_label_path=args.test_label,
+        max_samples=args.count,
+        output_report_path=args.output_report,
+    )
+
+    print("\n" + report.render_markdown() + "\n")
+
+    if getattr(args, "version", None) is not None:
+        reporter = BenchmarkingReporter(version=args.version)
+        reporter.record_unseen(report.to_dict(), report.render_markdown())
+
+
+def handle_pipeline(args: argparse.Namespace) -> None:
+    """Execute complete end-to-end automated fine-tuning pipeline:
+    Smoke Test -> Baseline Benchmark -> Pilot Run -> Full Training -> Checkpoint Benchmarking -> Export.
+    Generates unified comparison leaderboard in reports/benchmarking/v{version}/.
+    """
+    version_num, version_dir = resolve_report_dir(getattr(args, "version", None))
+    logger.info("=" * 75)
+    logger.info(f"🚀 INITIATING AUTOMATED KURDISH PADDLEOCR PIPELINE (VERSION: v{version_num})")
+    logger.info(f"📁 Benchmark artifacts will be stored in: {version_dir}")
+    logger.info("=" * 75)
+
+    reporter = BenchmarkingReporter(version=version_num)
+
+    # Stage 1: Smoke Test
+    logger.info("\n[STAGE 1/5] Executing Pre-Training Smoke Test...")
+    tester = SmokeTester(use_gpu=not args.no_gpu)
+    tester.run_all(
+        config_path=args.config,
+        dict_path=args.dict_path,
+        label_path=args.train_label,
+    )
+    logger.info(" Stage 1 (Smoke Test) passed successfully.")
+
+    # Stage 2: Baseline Benchmark (Foundation Model Zero-Shot)
+    logger.info("\n[STAGE 2/5] Evaluating Baseline Foundation Model...")
+    engine = BenchmarkEngine(
+        config_path=args.config,
+        dict_path=args.dict_path,
+        use_gpu=not args.no_gpu,
+    )
+    base_res = engine.run_benchmark(
+        model_path=args.pretrained_model,
+        val_label_path=args.val_label,
+        batch_size=args.batch_size or 32,
+        max_samples=args.eval_samples,
+    )
+    base_metrics = {
+        "checkpoint_path": str(Path(args.pretrained_model).resolve()),
+        "total_samples": base_res.total_samples,
+        "exact_matches": base_res.exact_matches,
+        "accuracy": base_res.accuracy,
+        "macro_cer": base_res.macro_cer,
+        "micro_cer": base_res.micro_cer,
+        "macro_wer": base_res.macro_wer,
+        "micro_wer": base_res.micro_wer,
+        "avg_latency_ms": base_res.avg_latency_ms,
+        "throughput_fps": base_res.throughput_fps,
+        "total_time_sec": base_res.total_time_sec,
+    }
+    reporter.record_baseline(base_metrics, model_name=Path(args.pretrained_model).stem)
+    logger.info(f" Stage 2 (Baseline) completed: Exact Match = {base_res.accuracy * 100:.2f}%, CER = {base_res.macro_cer * 100:.2f}%")
+
+    # Stage 3: Pilot Run (Convergence on mini subset)
+    logger.info("\n[STAGE 3/5] Starting Pilot Convergence Run...")
+    pilot_dir = Path(f"./output/v{version_num}/pilot").resolve()
+    pilot_runner = PilotRunner()
+    pilot_res = pilot_runner.run_pilot(
+        template_config_path=args.config,
+        character_dict_path=args.dict_path,
+        train_label_path=args.train_label,
+        val_label_path=args.val_label,
+        output_dir=pilot_dir,
+        num_samples=args.pilot_samples,
+        max_epochs=args.pilot_epochs,
+        batch_size=args.batch_size or 32,
+        max_eval_samples=args.eval_samples,
+    )
+    pilot_report_p = pilot_dir / "pilot_benchmark_report.json"
+    if pilot_report_p.is_file():
+        import json
+        with open(pilot_report_p, "r", encoding="utf-8") as f:
+            pilot_data = json.load(f)
+        reporter.record_pilot(
+            pilot_data,
+            config_path=pilot_dir / "pilot_runtime_config.yml",
+            train_label_path=pilot_dir / "pilot_train_label.txt",
+        )
+    logger.info(f" Stage 3 (Pilot Run) completed: Exact Match = {pilot_res.accuracy * 100:.2f}%, CER = {pilot_res.macro_cer * 100:.2f}%")
+
+    # Stage 4: Full Fine-Tuning (Continual learning without forgetting)
+    logger.info(f"\n[STAGE 4/5] Initiating Full Production Training ({args.epochs} epochs)...")
+    full_output_dir = Path(f"./output/v{version_num}/production_run").resolve()
+    full_output_dir.mkdir(parents=True, exist_ok=True)
+
+    from src.utils.hardware import get_hardware_profile
+    profile = get_hardware_profile()
+    eff_bs = args.batch_size or profile.recommended_train_batch
+    eff_workers = getattr(args, "workers", None) or profile.recommended_workers
+
+    injector = PaddleConfigInjector(args.config)
+    injector.inject_runtime_paths(
+        character_dict_path=args.dict_path,
+        train_label_path=args.train_label,
+        val_label_path=args.val_label,
+        save_model_dir=full_output_dir / "checkpoints",
+        pretrained_model_path=args.pretrained_model,
+        batch_size=eff_bs,
+        num_workers=eff_workers,
+        epoch_num=args.epochs,
+        learning_rate=args.lr,
+    )
+    runtime_cfg = full_output_dir / "runtime_config.yml"
+    injector.write_runtime_config(runtime_cfg)
+
+    trainer = PaddleTrainer()
+    benchmark_results = trainer.run_training(
+        config_path=runtime_cfg,
+        val_label_path=args.val_label,
+        dict_path=args.dict_path,
+        save_model_dir=full_output_dir / "checkpoints",
+        gpus=args.gpus,
+        auto_benchmark=True,
+    )
+    reporter.record_full_checkpoints(
+        checkpoints_dir=full_output_dir / "checkpoints",
+        benchmark_results=benchmark_results,
+    )
+    logger.info(" Stage 4 & 5 (Training & Checkpoints Benchmarking) completed.")
+
+    # Stage 6: Export & Final Leaderboard
+    logger.info("\n[STAGE 6/6] Exporting Best Checkpoint to Inference Model...")
+    exporter = ModelExporter()
+    export_dir = Path(f"./export/v{version_num}").resolve()
+    exporter.export(
+        checkpoint_path=full_output_dir / "checkpoints" / "best_accuracy",
+        config_path=runtime_cfg,
+        output_dir=export_dir,
+        dict_path=args.dict_path,
+    )
+    exporter.export(
+        checkpoint_path=full_output_dir / "checkpoints" / "best_accuracy",
+        config_path=runtime_cfg,
+        output_dir=Path("./export/kurdish_final").resolve(),
+        dict_path=args.dict_path,
+    )
+
+    # Stage 7: Unseen Multilingual Generalization Benchmark
+    logger.info("\n[STAGE 7/7] Benchmarking Unseen Test Data Across Linguistic Categories...")
+    from src.benchmark.unseen_evaluator import UnseenEvaluator
+    test_label_p = Path("data/kurdish_rec/test_rec.txt").resolve()
+    if test_label_p.is_file():
+        unseen_eval = UnseenEvaluator(model_dir=export_dir, batch_size=eff_bs, use_gpu=not args.no_gpu)
+        unseen_rep = unseen_eval.evaluate(
+            test_label_path=test_label_p,
+            max_samples=args.eval_samples,
+        )
+        reporter.record_unseen(unseen_rep.to_dict(), unseen_rep.render_markdown())
+        logger.info(f" Stage 7 (Unseen Generalization) completed: Exact Match = {unseen_rep.overall_accuracy * 100:.2f}%, CER = {unseen_rep.overall_cer * 100:.2f}%")
+
+    lead_md, sum_json = reporter.update_leaderboard()
+    logger.info("=" * 75)
+    logger.info("🎉 PIPELINE RUN COMPLETED SUCCESSFULLY!")
+    logger.info(f"📊 Leaderboard Report : {lead_md}")
+    logger.info(f"📈 Summary JSON       : {sum_json}")
+    logger.info(f"📦 Exported Model     : {export_dir}")
+    logger.info("=" * 75)
+    if lead_md.is_file():
+        print("\n" + lead_md.read_text(encoding="utf-8") + "\n")
+
+
+def handle_read(args: argparse.Namespace) -> None:
+    """Execute full-page, multi-page PDF, or book OCR using DocumentReader."""
+    import cv2
+    logger.info("Initializing Kurdish DocumentReader...")
+    reader = DocumentReader(
+        rec_model_dir=args.model_dir,
+        det_model_dir=args.det_model_dir,
+        use_gpu=not args.no_gpu,
+    )
+
+    target = Path(args.input).resolve()
+    if not target.exists():
+        logger.error(f"Input path does not exist: {target}")
+        sys.exit(1)
+
+    out_dir = Path(args.output_dir or "./extracted_documents").resolve()
+
+    if target.is_file() and target.suffix.lower() == ".pdf":
+        logger.info(f"Reading PDF Book: {target.name}...")
+        book_res = reader.read_pdf(
+            pdf_path=target,
+            dpi=args.dpi,
+            min_score=args.min_score,
+            annotate=not args.no_visuals,
+            max_pages=args.max_pages,
+        )
+        saved = book_res.save_outputs(out_dir, save_visuals=not args.no_visuals)
+        logger.info(f"Extracted {book_res.total_pages} pages, {book_res.total_lines:,} lines in {book_res.timing_ms['total_ms']/1000.0:.1f}s")
+        logger.info(f"Markdown Book: {saved['md']}")
+        logger.info(f"Text Book    : {saved['txt']}")
+        logger.info(f"JSON Data    : {saved['json']}")
+    elif target.is_dir():
+        logger.info(f"Reading Book Directory: {target.name}...")
+        book_res = reader.read_book_folder(
+            folder_path=target,
+            min_score=args.min_score,
+            annotate=not args.no_visuals,
+            max_pages=args.max_pages,
+        )
+        saved = book_res.save_outputs(out_dir, save_visuals=not args.no_visuals)
+        logger.info(f"Extracted {book_res.total_pages} pages, {book_res.total_lines:,} lines in {book_res.timing_ms['total_ms']/1000.0:.1f}s")
+    else:
+        logger.info(f"Reading Single Document: {target.name}...")
+        doc_res = reader.read_document(
+            image_input=target,
+            min_score=args.min_score,
+            annotate=not args.no_visuals,
+        )
+        out_dir.mkdir(parents=True, exist_ok=True)
+        txt_out = out_dir / f"{target.stem}_extracted.txt"
+        txt_out.write_text(doc_res.full_text, encoding="utf-8")
+        if doc_res.annotated_image is not None:
+            vis_out = out_dir / f"{target.stem}_annotated.jpg"
+            cv2.imwrite(str(vis_out), doc_res.annotated_image)
+        logger.info(f"Extracted {len(doc_res.lines)} lines. Total time: {doc_res.timing_ms.get('total_ms', 0):.1f} ms")
+        print("\n--- EXTRACTED TEXT ---")
+        print(doc_res.full_text)
+        print("----------------------\n")
+
+
+def handle_serve(args: argparse.Namespace) -> None:
+    """Launch the interactive web browser studio."""
+    from src.web.server import start_server
+    start_server(
+        rec_model_dir=args.model_dir,
+        det_model_dir=args.det_model_dir,
+        host=args.host,
+        port=args.port,
+        open_browser=not args.no_browser,
     )
 
 
@@ -459,6 +817,7 @@ def main() -> None:
     p_bench_base.add_argument("--output-report", type=str, default="./output/base_benchmark_report.json", help="Report destination")
     p_bench_base.add_argument("--batch-size", type=int, default=32, help="Inference batch size")
     p_bench_base.add_argument("--max-samples", type=int, default=None, help="Limit maximum samples to benchmark (e.g. 100 for fast eval)")
+    p_bench_base.add_argument("--version", type=str, default=None, help="Report version directory tag (e.g. '1' or 'v1')")
     p_bench_base.add_argument("--no-gpu", action="store_true", help="Run benchmark on CPU")
     p_bench_base.set_defaults(func=handle_benchmark_base)
 
@@ -473,6 +832,7 @@ def main() -> None:
     p_pilot.add_argument("--num-samples", type=int, default=500, help="Number of pilot subset samples")
     p_pilot.add_argument("--max-epochs", type=int, default=2, help="Number of mini-epochs")
     p_pilot.add_argument("--batch-size", type=int, default=32, help="Batch size")
+    p_pilot.add_argument("--version", type=str, default=None, help="Report version directory tag (e.g. '1' or 'v1')")
     p_pilot.set_defaults(func=handle_pilot_run)
 
     # 5. train
@@ -485,8 +845,10 @@ def main() -> None:
     p_train.add_argument("--output-dir", type=str, default="./output/production_run", help="Output directory")
     p_train.add_argument("--epochs", type=int, default=40, help="Total training epochs (default: 40)")
     p_train.add_argument("--batch-size", type=int, default=None, help="Batch size (None for auto-detection)")
+    p_train.add_argument("--workers", type=int, default=None, help="DataLoader worker count (None for hardware auto-tune)")
     p_train.add_argument("--lr", type=float, default=0.001, help="Initial learning rate")
     p_train.add_argument("--gpus", type=str, default="0", help="GPU indices (e.g. '0' or '0,1')")
+    p_train.add_argument("--version", type=str, default=None, help="Report version directory tag (e.g. '1' or 'v1')")
     p_train.set_defaults(func=handle_train)
 
     # 6. export
@@ -495,6 +857,7 @@ def main() -> None:
     p_export.add_argument("--config", type=str, default=default_train_config, help="Model config YAML")
     p_export.add_argument("--output-dir", type=str, default="./export/kurdish_final", help="Destination export directory")
     p_export.add_argument("--dict-path", type=str, default=default_dict, help="Character dictionary path")
+    p_export.add_argument("--version", type=str, default=None, help="Report and model version tag (e.g. '1' or 'v1')")
     p_export.set_defaults(func=handle_export)
 
     # 7. benchmark-all
@@ -504,9 +867,53 @@ def main() -> None:
     p_bench_all.add_argument("--val-label", type=str, default=default_val, help="Val labels")
     p_bench_all.add_argument("--dict-path", type=str, default=default_dict, help="Dictionary path")
     p_bench_all.add_argument("--max-samples", type=int, default=None, help="Limit samples to benchmark (e.g. 100 for fast eval)")
+    p_bench_all.add_argument("--version", type=str, default=None, help="Report version directory tag (e.g. '1' or 'v1')")
     p_bench_all.set_defaults(func=handle_benchmark_all)
 
-    # 8. infer
+    # 7.5. benchmark-unseen
+    p_bench_unseen = subparsers.add_parser("benchmark-unseen", help="Evaluate model against unseen test data across linguistic domains")
+    p_bench_unseen.add_argument("--model-dir", type=str, default=default_infer_model, help="Exported model directory")
+    p_bench_unseen.add_argument("--test-label", type=str, default="data/kurdish_rec/test_rec.txt", help="Path to unseen test label file")
+    p_bench_unseen.add_argument("--count", type=int, default=None, help="Sample count limit (default: all)")
+    p_bench_unseen.add_argument("--batch-size", type=int, default=32, help="Inference batch size")
+    p_bench_unseen.add_argument("--output-report", type=str, default=None, help="Optional JSON report output path")
+    p_bench_unseen.add_argument("--version", type=str, default=None, help="Report version directory tag (e.g. '1' or 'v1')")
+    p_bench_unseen.add_argument("--no-gpu", action="store_true", help="Run benchmark on CPU")
+    p_bench_unseen.set_defaults(func=handle_benchmark_unseen)
+
+    # 8. pipeline (Automated End-to-End MLOps Pipeline)
+    p_pipe = subparsers.add_parser("pipeline", help="Run end-to-end automated pipeline: Smoke -> Baseline -> Pilot -> Train -> Benchmark -> Export")
+    p_pipe.add_argument("--version", type=str, default=None, help="Report version tag (default: auto-incremented v1, v2...)")
+    p_pipe.add_argument("--config", type=str, default=default_train_config, help="Template config")
+    p_pipe.add_argument("--pretrained-model", type=str, default=default_model, help="Base pretrained weights (.pdparams)")
+    p_pipe.add_argument("--dict-path", type=str, default=default_dict, help="Dictionary path")
+    p_pipe.add_argument("--train-label", type=str, default=default_train, help="Train labels")
+    p_pipe.add_argument("--val-label", type=str, default=default_val, help="Val labels")
+    p_pipe.add_argument("--epochs", type=int, default=40, help="Full training epochs (default: 40)")
+    p_pipe.add_argument("--batch-size", type=int, default=None, help="Batch size (None for hardware auto-tune)")
+    p_pipe.add_argument("--workers", type=int, default=None, help="DataLoader worker count (None for hardware auto-tune)")
+    p_pipe.add_argument("--lr", type=float, default=0.001, help="Initial learning rate")
+    p_pipe.add_argument("--pilot-samples", type=int, default=200, help="Pilot subset sample count (default: 200)")
+    p_pipe.add_argument("--pilot-epochs", type=int, default=2, help="Pilot epochs (default: 2)")
+    p_pipe.add_argument("--eval-samples", type=int, default=None, help="Evaluation sample limit (None for all)")
+    p_pipe.add_argument("--gpus", type=str, default="0", help="GPU indices")
+    p_pipe.add_argument("--no-gpu", action="store_true", help="Force CPU execution")
+    p_pipe.set_defaults(func=handle_pipeline)
+
+    # 9. read / read-document / read-book
+    p_read = subparsers.add_parser("read", aliases=["read-document", "read-book"], help="Read full page documents, multi-page PDFs, or book directories")
+    p_read.add_argument("--input", "-i", type=str, required=True, help="Path to document image, PDF file, or book image folder")
+    p_read.add_argument("--output-dir", "-o", type=str, default="./extracted_documents", help="Destination folder for text/markdown/visualizations")
+    p_read.add_argument("--model-dir", type=str, default=default_infer_model, help="Recognition model directory")
+    p_read.add_argument("--det-model-dir", type=str, default="assets/base_det_inference", help="Detection model directory")
+    p_read.add_argument("--dpi", type=int, default=200, help="Rendering resolution for PDF pages (default: 200)")
+    p_read.add_argument("--min-score", type=float, default=0.3, help="Minimum confidence threshold (default: 0.3)")
+    p_read.add_argument("--max-pages", type=int, default=None, help="Maximum pages to process")
+    p_read.add_argument("--no-visuals", action="store_true", help="Disable generating annotated visual bounding box images")
+    p_read.add_argument("--no-gpu", action="store_true", help="Run document OCR on CPU")
+    p_read.set_defaults(func=handle_read)
+
+    # 10. infer
     p_infer = subparsers.add_parser("infer", help="Run OCR text recognition on images or test splits")
     p_infer.add_argument("--model-dir", type=str, default=default_infer_model, help="Exported model directory")
     p_infer.add_argument("--image", type=str, default=None, help="Path to single image or folder of images")
@@ -515,6 +922,15 @@ def main() -> None:
     p_infer.add_argument("--batch-size", type=int, default=16, help="Inference batch size")
     p_infer.add_argument("--no-gpu", action="store_true", help="Force CPU inference")
     p_infer.set_defaults(func=handle_infer)
+
+    # 11. serve (Interactive Web Studio)
+    p_serve = subparsers.add_parser("serve", help="Launch interactive web browser studio for testing recognition")
+    p_serve.add_argument("--model-dir", type=str, default=default_infer_model, help="Path to exported recognition model")
+    p_serve.add_argument("--det-model-dir", type=str, default="assets/base_det_inference", help="Path to detection model")
+    p_serve.add_argument("--port", type=int, default=8501, help="Web server port (default: 8501)")
+    p_serve.add_argument("--host", type=str, default="127.0.0.1", help="Web server host (default: 127.0.0.1)")
+    p_serve.add_argument("--no-browser", action="store_true", help="Do not automatically open web browser")
+    p_serve.set_defaults(func=handle_serve)
 
     args = parser.parse_args()
     args.func(args)

@@ -116,26 +116,38 @@ def get_hardware_profile() -> HardwareProfile:
             pass
 
     # Recommended batch sizing:
-    # Batch size must be a multiple of 16 for PaddleOCR's MultiScaleSampler divided_factor ([8, 16]).
+    # Tuned for PP-OCRv5 recognition (SVTR backbone + CTC + NRTR MultiHead):
+    # Base model/framework/Adam optimizer requires ~3.8 GB VRAM.
+    # We calibrate batch sizes so total memory stays strictly within dedicated VRAM,
+    # preventing Windows WDDM PCIe paging into system RAM.
     if not has_gpu or gpu_memory_mb <= 0:
         recommended_train_batch = 16
         recommended_eval_batch = 16
         recommended_amp = "O0"
     else:
-        # Budget ~75% of GPU memory (~11.6 MB per batch unit measured on PP-OCRv5)
-        raw_units = (gpu_memory_mb * 0.75) / 11.6
-        batch = int(math.floor(raw_units / 16.0) * 16)
-        # Cap between 16 and 384 for stability
-        recommended_train_batch = max(16, min(384, batch))
-        # Keep eval batch size capped (<= 96) so validation during training doesn't spike VRAM
-        recommended_eval_batch = min(96, recommended_train_batch)
+        if gpu_memory_mb <= 4096:
+            recommended_train_batch = 16
+        elif gpu_memory_mb <= 6144:
+            recommended_train_batch = 32
+        elif gpu_memory_mb <= 8192:
+            recommended_train_batch = 48
+        elif gpu_memory_mb <= 12288:
+            recommended_train_batch = 64
+        elif gpu_memory_mb <= 16384:
+            recommended_train_batch = 96
+        else:
+            recommended_train_batch = 128
+        recommended_eval_batch = min(48, recommended_train_batch)
         recommended_amp = "O2"
 
     # Dataloader workers:
-    # Each worker buffers minibatches. Budget ~1.5 GB per worker against free RAM.
-    cpu_cap = min(8, max(2, int(cpu_cores // 1.5)))
-    ram_cap = max(2, int(free_ram_gb // 1.5))
-    recommended_workers = min(cpu_cap, ram_cap)
+    # Explicitly guarantee at least 10 GB of host RAM is ALWAYS preserved free for user applications.
+    # Budget ~1.2 GB per worker process from the available memory above the 10 GB safety floor.
+    usable_ram_headroom = max(0.0, free_ram_gb - 10.0)
+    ram_worker_cap = max(1, int(usable_ram_headroom // 1.5))
+    max_workers_platform = 4 if (os.name == "nt" and free_ram_gb >= 20.0) else (2 if os.name == "nt" else 6)
+    cpu_cap = min(max_workers_platform, max(1, int(cpu_cores // 4)))
+    recommended_workers = max(1, min(cpu_cap, ram_worker_cap))
 
     return HardwareProfile(
         has_gpu=has_gpu,

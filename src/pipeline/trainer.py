@@ -122,27 +122,36 @@ class PaddleTrainer:
         )
 
         recent_lines: list[str] = []
-        if process.stdout:
-            for line in process.stdout:
-                line_str = line.strip()
-                recent_lines.append(line_str)
-                if len(recent_lines) > 50:
-                    recent_lines.pop(0)
+        try:
+            if process.stdout:
+                for line in process.stdout:
+                    line_str = line.strip()
+                    recent_lines.append(line_str)
+                    if len(recent_lines) > 50:
+                        recent_lines.pop(0)
 
-                lower = line_str.lower()
-                if "epoch:" in lower or "loss:" in lower or "acc:" in lower or "speed:" in lower:
-                    logger.info(f"[TRAIN] {line_str}")
-                elif "save model in" in lower or "best model is saved" in lower or "best metric" in lower:
-                    logger.info(f"[CHECKPOINT] {line_str}")
-                elif "error" in lower or "exception" in lower or "traceback" in lower or "fail" in lower:
-                    logger.warning(f"[STDERR] {line_str}")
-                elif "train dataloader has" in lower or "load pretrain successful" in lower or "backbone frozen" in lower or "backbone unfrozen" in lower:
-                    logger.info(f"[INIT] {line_str}")
+                    lower = line_str.lower()
+                    if "epoch:" in lower or "loss:" in lower or "acc:" in lower or "speed:" in lower:
+                        logger.info(f"[TRAIN] {line_str}")
+                    elif "save model in" in lower or "best model is saved" in lower or "best metric" in lower:
+                        logger.info(f"[CHECKPOINT] {line_str}")
+                    elif "error" in lower or "exception" in lower or "traceback" in lower or "fail" in lower:
+                        logger.warning(f"[STDERR] {line_str}")
+                    elif "train dataloader has" in lower or "load pretrain successful" in lower or "backbone frozen" in lower or "backbone unfrozen" in lower:
+                        logger.info(f"[INIT] {line_str}")
 
-        process.wait()
-        if process.returncode != 0:
-            error_tail = "\n".join(recent_lines[-25:])
-            raise RuntimeError(f"Training failed with returncode {process.returncode}:\n{error_tail}")
+            process.wait()
+            if process.returncode != 0:
+                error_tail = "\n".join(recent_lines[-25:])
+                raise RuntimeError(f"Training failed with returncode {process.returncode}:\n{error_tail}")
+        except KeyboardInterrupt:
+            logger.warning("Training cancelled by user. Terminating background training process...")
+            process.terminate()
+            try:
+                process.wait(timeout=5)
+            except Exception:
+                process.kill()
+            raise
 
         logger.info(f"Training process completed. Checkpoints written to: {save_dir_p}")
 

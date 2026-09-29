@@ -113,7 +113,12 @@ fi
 
 # 5. Install unified dependencies
 echo "[*] Installing project dependencies (requirements.txt)..."
-${PYTHON} -m pip install -r requirements.txt --quiet
+if command -v uv >/dev/null 2>&1; then
+    echo "[OK] Found uv ($(uv --version)) - utilizing ultra-fast package installer"
+    uv pip install --python "${PYTHON}" -r requirements.txt
+else
+    ${PYTHON} -m pip install -r requirements.txt --quiet
+fi
 echo "[OK] Dependencies installed"
 
 # 6. Verify / download official base models

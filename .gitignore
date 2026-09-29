@@ -14,7 +14,10 @@ __pycache__/
 # --- generated training / export / report artifacts ---
 /output/
 /export/
-/reports/
+/extracted_documents/
+*.log
+/reports/*
+!/reports/benchmarking/
 
 # --- heavy pretrained binary weights (auto-downloaded by setup.ps1 / download_base_models.py) ---
 pretrain_models/*.pdparams

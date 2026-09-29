@@ -240,3 +240,33 @@ class Visualizer:
             f.write("\n".join(lines) + "\n")
 
         return output_path
+
+    @classmethod
+    def render_card(cls, title: str, items: list[tuple[str, Any]], status: str = "SUCCESS") -> str:
+        """Render a clean, bordered CLI card with structured key-value information."""
+        if not items:
+            return f"[{title}]"
+
+        max_key_len = max((len(str(k)) for k, _ in items), default=15)
+        content_widths = [len(str(k)) + len(str(v)) + 6 for k, v in items]
+        total_width = max(70, max(content_widths) if content_widths else 70, len(title) + 10)
+
+        top = f"┌{'─' * (total_width - 2)}┐"
+        mid = f"├{'─' * (total_width - 2)}┤"
+        bot = f"└{'─' * (total_width - 2)}┘"
+
+        lines = [top]
+        header = f" {title} "
+        lines.append(f"│{cls.BOLD}{header.ljust(total_width - 2)}{cls.RESET}│")
+        lines.append(mid)
+
+        for k, v in items:
+            key_str = f"  {k}".ljust(max_key_len + 4)
+            val_str = str(v)
+            inner = f"{key_str}: {val_str}"
+            if len(inner) > total_width - 4:
+                inner = inner[:total_width - 7] + "..."
+            lines.append(f"│ {inner.ljust(total_width - 4)} │")
+
+        lines.append(bot)
+        return "\n".join(lines)

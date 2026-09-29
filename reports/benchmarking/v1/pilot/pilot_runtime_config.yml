@@ -1,0 +1,160 @@
+Global:
+  model_name: arabic_PP-OCRv5_mobile_rec
+  debug: false
+  use_gpu: true
+  epoch_num: 1
+  log_smooth_window: 20
+  print_batch_step: 20
+  save_model_dir: C:\Users\A\Desktop\Tools - QAI Enviroment\qai-ocr\qai-paddle-ocr-finetuning\output\pilot\pilot_run\checkpoints
+  save_epoch_step: 1
+  eval_batch_step:
+  - 0
+  - 1000
+  cal_metric_during_train: true
+  pretrained_model: C:\Users\A\Desktop\Tools - QAI Enviroment\qai-ocr\qai-paddle-ocr-finetuning\pretrain_models\arabic_PP-OCRv5_mobile_rec_pretrained
+  checkpoints: null
+  freeze_backbone_epochs: 2
+  save_inference_dir: C:\Users\A\Desktop\Tools - QAI Enviroment\qai-ocr\qai-paddle-ocr-finetuning\output\pilot\pilot_run\checkpoints\inference
+  use_visualdl: false
+  infer_img: null
+  character_dict_path: C:\Users\A\Desktop\Tools - QAI Enviroment\qai-ocr\qai-paddle-ocr-finetuning\configs\arabic_kurdish_dict.txt
+  max_text_length: 40
+  infer_mode: false
+  use_space_char: true
+  distributed: false
+  save_res_path: C:\Users\A\Desktop\Tools - QAI Enviroment\qai-ocr\qai-paddle-ocr-finetuning\output\pilot\pilot_run\checkpoints\predicts.txt
+  d2s_train_image_shape:
+  - 3
+  - 48
+  - 320
+  amp_level: O2
+Optimizer:
+  name: Adam
+  beta1: 0.9
+  beta2: 0.999
+  lr:
+    name: Cosine
+    learning_rate: 0.001
+    warmup_epoch: 3
+  regularizer:
+    name: L2
+    factor: 3.0e-05
+Architecture:
+  model_type: rec
+  algorithm: SVTR_LCNet
+  Transform: null
+  Backbone:
+    name: PPLCNetV3
+    scale: 0.95
+  Head:
+    name: MultiHead
+    head_list:
+    - CTCHead:
+        Neck:
+          name: svtr
+          dims: 120
+          depth: 2
+          hidden_dims: 120
+          kernel_size:
+          - 1
+          - 3
+          use_guide: true
+        Head:
+          fc_decay: 1.0e-05
+    - NRTRHead:
+        nrtr_dim: 384
+        max_text_length: 32
+    out_channels_list:
+      CTCLabelDecode: 749
+      SARLabelDecode: 749
+      NRTRLabelDecode: 752
+Loss:
+  name: MultiLoss
+  loss_config_list:
+  - CTCLoss: null
+  - NRTRLoss: null
+PostProcess:
+  name: CTCLabelDecode
+Metric:
+  name: RecMetric
+  main_indicator: acc
+  ignore_space: false
+Train:
+  dataset:
+    name: MultiScaleDataSet
+    ds_width: false
+    data_dir: C:/Users/A/Desktop/Tools - QAI Enviroment/qai-ocr/qai-paddle-ocr-finetuning/data/kurdish_rec/
+    ext_op_transform_idx: 1
+    label_file_list:
+    - C:/Users/A/Desktop/Tools - QAI Enviroment/qai-ocr/qai-paddle-ocr-finetuning/output/pilot/pilot_run/pilot_train_label.txt
+    transforms:
+    - DecodeImage:
+        img_mode: BGR
+        channel_first: false
+    - RecConAug:
+        prob: 0.5
+        ext_data_num: 2
+        image_shape:
+        - 48
+        - 320
+        - 3
+        max_text_length: 32
+    - RecAug: null
+    - MultiLabelEncode:
+        gtc_encode: NRTRLabelEncode
+    - KeepKeys:
+        keep_keys:
+        - image
+        - label_ctc
+        - label_gtc
+        - length
+        - valid_ratio
+  sampler:
+    name: MultiScaleSampler
+    scales:
+    - - 320
+      - 32
+    - - 320
+      - 48
+    - - 320
+      - 64
+    first_bs: 16
+    fix_bs: false
+    divided_factor:
+    - 8
+    - 16
+    is_training: true
+  loader:
+    shuffle: true
+    batch_size_per_card: 16
+    drop_last: true
+    num_workers: 2
+Eval:
+  dataset:
+    name: SimpleDataSet
+    data_dir: C:/Users/A/Desktop/Tools - QAI Enviroment/qai-ocr/qai-paddle-ocr-finetuning/data/kurdish_rec/
+    label_file_list:
+    - C:/Users/A/Desktop/Tools - QAI Enviroment/qai-ocr/qai-paddle-ocr-finetuning/data/kurdish_rec/val_rec.txt
+    transforms:
+    - DecodeImage:
+        img_mode: BGR
+        channel_first: false
+    - MultiLabelEncode:
+        gtc_encode: NRTRLabelEncode
+    - RecResizeImg:
+        image_shape:
+        - 3
+        - 48
+        - 320
+    - KeepKeys:
+        keep_keys:
+        - image
+        - label_ctc
+        - label_gtc
+        - length
+        - valid_ratio
+  loader:
+    shuffle: false
+    drop_last: false
+    batch_size_per_card: 16
+    num_workers: 2

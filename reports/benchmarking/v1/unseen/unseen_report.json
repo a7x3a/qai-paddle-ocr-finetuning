@@ -1,0 +1,62 @@
+{
+  "model_name": "kurdish_final",
+  "model_path": "C:\\Users\\A\\Desktop\\Tools - QAI Enviroment\\qai-ocr\\qai-paddle-ocr-finetuning-main\\export\\kurdish_final",
+  "test_file": "C:\\Users\\A\\Desktop\\Tools - QAI Enviroment\\qai-ocr\\qai-paddle-ocr-finetuning-main\\data\\kurdish_rec\\test_rec.txt",
+  "total_samples": 1000,
+  "overall_accuracy": 0.892,
+  "overall_cer": 0.0813,
+  "overall_wer": 0.1083,
+  "avg_latency_ms": 3.29,
+  "throughput_fps": 304.04,
+  "categories": {
+    "OVERALL": {
+      "category": "OVERALL",
+      "samples": 1000,
+      "exact_match_acc": 0.892,
+      "cer": 0.0813,
+      "wer": 0.1083,
+      "avg_confidence": 0.9332
+    },
+    "KURDISH": {
+      "category": "KURDISH",
+      "samples": 357,
+      "exact_match_acc": 0.888,
+      "cer": 0.0855,
+      "wer": 0.112,
+      "avg_confidence": 0.9525
+    },
+    "ARABIC": {
+      "category": "ARABIC",
+      "samples": 307,
+      "exact_match_acc": 0.8436,
+      "cer": 0.1056,
+      "wer": 0.1564,
+      "avg_confidence": 0.8951
+    },
+    "ENGLISH": {
+      "category": "ENGLISH",
+      "samples": 26,
+      "exact_match_acc": 0.5,
+      "cer": 0.1135,
+      "wer": 0.5,
+      "avg_confidence": 0.9149
+    },
+    "NUMERIC": {
+      "category": "NUMERIC",
+      "samples": 309,
+      "exact_match_acc": 0.9773,
+      "cer": 0.0251,
+      "wer": 0.0254,
+      "avg_confidence": 0.952
+    },
+    "OTHER": {
+      "category": "OTHER",
+      "samples": 1,
+      "exact_match_acc": 1.0,
+      "cer": 0.0,
+      "wer": 0.0,
+      "avg_confidence": 0.3622
+    }
+  },
+  "created_at": "2026-09-29 10:26:34"
+}

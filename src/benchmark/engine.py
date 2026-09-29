@@ -51,7 +51,8 @@ class CTCDecoder:
 
         # PaddleOCR CTC dictionary structure: 0 is CTC blank, followed by dict chars
         self.character_list = ["blank"] + self.character_list
-        self.reverse = "arabic" in str(self.character_dict_path).lower()
+        dict_lower = str(self.character_dict_path).lower()
+        self.reverse = "arabic" in dict_lower and "kurdish" not in dict_lower
 
     def pred_reverse(self, chars: list[str]) -> str:
         """Reverse RTL character sequence adhering to official PaddleOCR CTCLabelDecode rules."""

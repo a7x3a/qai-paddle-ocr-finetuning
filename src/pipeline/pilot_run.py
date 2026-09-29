@@ -218,7 +218,14 @@ class PilotRunner:
         if not checkpoint_candidates:
             raise FileNotFoundError(f"No checkpoint .pdparams generated in: {pilot_checkpoint_dir}")
 
-        best_ckpt = next((c for c in checkpoint_candidates if "best_accuracy" in c.name), checkpoint_candidates[0])
+        best_candidates = [c for c in checkpoint_candidates if "best_accuracy" in c.name]
+        latest_candidates = [c for c in checkpoint_candidates if "latest" in c.name]
+        if best_candidates:
+            best_ckpt = best_candidates[0]
+        elif latest_candidates:
+            best_ckpt = latest_candidates[0]
+        else:
+            best_ckpt = sorted(checkpoint_candidates, key=lambda p: p.stat().st_mtime, reverse=True)[0]
         logger.info(f"Evaluating pilot checkpoint: {best_ckpt}")
 
         # 5. Benchmark pilot checkpoint against validation set

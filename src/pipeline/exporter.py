@@ -79,6 +79,13 @@ class ModelExporter:
         logger.info(f"Output inference directory: {out_p}")
 
         export_py = self.paddleocr_dir / "tools" / "export_model.py"
+        dict_p = Path(dict_path).resolve() if dict_path else Path("configs/arabic_kurdish_dict.txt").resolve()
+        if not dict_p.is_file():
+            # Fallback search
+            fallback = Path("assets/base_rec_inference/ppocr_keys.txt").resolve()
+            if fallback.is_file():
+                dict_p = fallback
+
         cmd = [
             sys.executable,
             str(export_py),
@@ -87,6 +94,7 @@ class ModelExporter:
             "-o",
             f"Global.checkpoints={str(ckpt_p).replace('\\', '/')}",
             f"Global.save_inference_dir={str(out_p).replace('\\', '/')}",
+            f"Global.character_dict_path={str(dict_p).replace('\\', '/')}",
             "Global.infer_mode=false",
             "Global.use_space_char=true",
         ]
@@ -112,6 +120,7 @@ class ModelExporter:
                 recent_lines.append(line_str)
                 if len(recent_lines) > 50:
                     recent_lines.pop(0)
+
                 if "inference model is saved" in line_str or "export" in line_str.lower():
                     logger.info(f"[EXPORT] {line_str}")
 
@@ -120,11 +129,33 @@ class ModelExporter:
             tail = "\n".join(recent_lines[-20:])
             raise RuntimeError(f"Export failed with exit code {process.returncode}:\n{tail}")
 
+        # Post-export sanitization: Paddle PIR runtime requires float32 attributes (0.a_f32)
+        # for batch_norm/layer_norm epsilon. If export serialized them as 0.a_f64, sanitize them.
+        json_file = out_p / "inference.json"
+        if json_file.is_file():
+            try:
+                import json
+                with open(json_file, "r", encoding="utf-8") as f:
+                    jdata = json.load(f)
+                modified = False
+                for op in jdata.get("program", {}).get("regions", [{}])[0].get("blocks", [{}])[0].get("ops", []):
+                    A = op.get("A", [])
+                    if isinstance(A, list):
+                        for item in A:
+                            if isinstance(item, dict) and item.get("N") == "epsilon":
+                                if item.get("AT", {}).get("#") != "0.a_f32":
+                                    item["AT"]["#"] = "0.a_f32"
+                                    modified = True
+                if modified:
+                    with open(json_file, "w", encoding="utf-8") as f:
+                        json.dump(jdata, f)
+                    logger.info("Sanitized PIR epsilon float attributes in inference.json for runtime compatibility.")
+            except Exception as e:
+                logger.warning(f"Could not sanitize inference.json PIR attributes: {e}")
+
         # Bundle character dictionary so the exported model is self-contained
-        if dict_path and Path(dict_path).is_file():
-            shutil.copy2(str(dict_path), str(out_p / Path(dict_path).name))
-        elif Path("configs/arabic_kurdish_dict.txt").is_file():
-            shutil.copy2("configs/arabic_kurdish_dict.txt", str(out_p / "arabic_kurdish_dict.txt"))
+        if dict_p.is_file():
+            shutil.copy2(str(dict_p), str(out_p / "arabic_kurdish_dict.txt"))
 
         exported_files = sorted(list(out_p.iterdir()), key=lambda x: x.name)
         logger.info(f"Export successfully completed! {len(exported_files)} files written to: {out_p}")

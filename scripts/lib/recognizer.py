@@ -82,7 +82,9 @@ class Recognizer:
         # reversed text ("نور" -> "رون") and every metric looks catastrophic.
         import tempfile
         workdir = Path(tempfile.mkdtemp(prefix="kurdish_rec_"))
-        dictionary_file = workdir / "arabic_dict.txt"
+        is_kurdish = "kurdish" in str(self.model_dir).lower()
+        dict_filename = "kurdish_dict.txt" if is_kurdish else "arabic_dict.txt"
+        dictionary_file = workdir / dict_filename
         dictionary_file.write_text("\n".join(entries) + "\n", encoding="utf-8")
         self._workdir = workdir
         self._dictionary_path = dictionary_file

@@ -143,11 +143,15 @@ $python = $venvPython
 $previousPreference = $ErrorActionPreference
 $ErrorActionPreference = 'Continue'
 
-try {
-    Write-QaiStep 'upgrading pip and setuptools...'
-    & $python -m pip install --upgrade pip setuptools wheel --timeout 120 --retries 5 --quiet
-    if ($LASTEXITCODE -ne 0) { throw 'failed to upgrade pip' }
-    Write-QaiOk 'pip ready'
+    $uv = Get-Command uv -ErrorAction SilentlyContinue
+    if ($uv) {
+        Write-QaiOk "uv package manager detected ($(& uv --version)) - utilizing ultra-fast caching"
+    } else {
+        Write-QaiStep 'upgrading pip and setuptools...'
+        & $python -m pip install --upgrade pip setuptools wheel --timeout 120 --retries 5 --quiet
+        if ($LASTEXITCODE -ne 0) { throw 'failed to upgrade pip' }
+        Write-QaiOk 'pip ready'
+    }
 
     # ------------------------------------------------------------ 2. PaddlePaddle Installation
     if ($SkipPaddleInstall) {
@@ -236,7 +240,11 @@ try {
 
     # ------------------------------------------------------------ 4. Requirements
     Write-QaiStep 'installing unified dependencies (requirements.txt)...'
-    & $python -m pip install -r (Join-Path $projectRoot 'requirements.txt') --quiet
+    if ($uv) {
+        & uv pip install --python $python -r (Join-Path $projectRoot 'requirements.txt')
+    } else {
+        & $python -m pip install -r (Join-Path $projectRoot 'requirements.txt') --quiet
+    }
     if ($LASTEXITCODE -ne 0) { throw 'failed to install requirements.txt' }
     Write-QaiOk 'requirements.txt installed successfully'
 }

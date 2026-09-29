@@ -1,6 +1,7 @@
-.PHONY: help setup prepare smoke benchmark_base pilot train export report infer clean
+.PHONY: help setup prepare smoke benchmark_base pilot train export report pipeline read serve infer clean
 
-PYTHON ?= python
+UV := $(shell where uv 2>nul || which uv 2>/dev/null)
+PYTHON ?= $(if $(UV),uv run python,python)
 
 help:
 	@echo "================================================================================"
@@ -13,8 +14,11 @@ help:
 	@echo "  benchmark_base Benchmark un-finetuned baseline foundation model"
 	@echo "  pilot          Execute pilot convergence run and quick evaluation"
 	@echo "  train          Run production fine-tuning on complete dataset"
+	@echo "  pipeline       Run end-to-end flow: Smoke -> Base -> Pilot -> Train -> Export"
 	@echo "  export         Export best checkpoint to deployable inference model"
 	@echo "  report         Benchmark all saved checkpoints and generate leaderboard"
+	@echo "  read           OCR full-page document, PDF, or book (INPUT=path)"
+	@echo "  serve          Launch interactive web studio browser interface"
 	@echo "  infer          Run inference on sample images with ground-truth comparison"
 	@echo "  clean          Remove temporary runtime artifacts and Python caches"
 	@echo "================================================================================"
@@ -37,14 +41,26 @@ pilot:
 train:
 	$(PYTHON) main.py train
 
+pipeline:
+	$(PYTHON) main.py pipeline
+
 export:
 	$(PYTHON) main.py export
 
 report:
 	$(PYTHON) main.py benchmark-all --checkpoints-dir output/production_run/checkpoints
 
+read:
+	$(PYTHON) main.py read --input $(INPUT)
+
+serve:
+	$(PYTHON) main.py serve
+
 infer:
 	$(PYTHON) main.py infer --split test --count 5
+
+benchmark_unseen:
+	$(PYTHON) main.py benchmark-unseen --count 1000
 
 clean:
 	find . -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true

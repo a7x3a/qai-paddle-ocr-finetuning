@@ -67,7 +67,7 @@ class PaddleConfigInjector:
         save_model_dir: Union[str, Path],
         pretrained_model_path: Optional[Union[str, Path]] = None,
         batch_size: Optional[int] = None,
-        num_workers: int = 8,
+        num_workers: Optional[int] = None,
         epoch_num: Optional[int] = None,
         learning_rate: Optional[float] = None,
         max_text_length: int = 40,
@@ -137,9 +137,14 @@ class PaddleConfigInjector:
         if epoch_num is not None:
             cfg["Global"]["epoch_num"] = epoch_num
 
-        # 2. Batch size resolution
-        effective_bs = batch_size or auto_detect_gpu_batch_size()
-        logger.info(f"Target batch size allocated: {effective_bs}")
+        cfg["Global"]["print_batch_step"] = 10
+        cfg["Global"]["save_epoch_step"] = 1
+
+        # 2. Hardware profile and allocation
+        profile = get_hardware_profile()
+        effective_bs = batch_size or profile.recommended_train_batch
+        effective_workers = num_workers if num_workers is not None else profile.recommended_workers
+        logger.info(f"Allocated parameters: Batch Size = {effective_bs}, Workers = {effective_workers}")
 
         # Determine dataset root containing 'images'
         train_data_dir = "./"
@@ -160,7 +165,7 @@ class PaddleConfigInjector:
             cfg["Train"]["dataset"]["label_file_list"] = [str(train_p).replace("\\", "/")]
             if "loader" in cfg["Train"]:
                 cfg["Train"]["loader"]["batch_size_per_card"] = effective_bs
-                cfg["Train"]["loader"]["num_workers"] = num_workers
+                cfg["Train"]["loader"]["num_workers"] = effective_workers
             if "sampler" in cfg["Train"]:
                 cfg["Train"]["sampler"]["first_bs"] = effective_bs
 
@@ -168,10 +173,10 @@ class PaddleConfigInjector:
         if "Eval" in cfg:
             cfg["Eval"]["dataset"]["data_dir"] = val_data_dir
             cfg["Eval"]["dataset"]["label_file_list"] = [str(val_p).replace("\\", "/")]
-            eval_bs = min(effective_bs, 64)
+            eval_bs = min(effective_bs, profile.recommended_eval_batch)
             if "loader" in cfg["Eval"]:
                 cfg["Eval"]["loader"]["batch_size_per_card"] = eval_bs
-                cfg["Eval"]["loader"]["num_workers"] = max(2, num_workers // 2)
+                cfg["Eval"]["loader"]["num_workers"] = max(1, effective_workers // 2)
 
         # 5. Architecture Head classes
         if "Architecture" in cfg and "Head" in cfg["Architecture"]:

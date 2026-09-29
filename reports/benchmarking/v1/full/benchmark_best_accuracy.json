@@ -1,0 +1,13 @@
+{
+  "checkpoint_path": "E:\\qai-paddle-ocr-finetuning\\output\\production_run\\checkpoints\\best_accuracy.pdparams",
+  "total_samples": 13981,
+  "exact_matches": 10534,
+  "accuracy": 0.7535,
+  "macro_cer": 0.2062,
+  "micro_cer": 0.4202,
+  "macro_wer": 0.2461,
+  "micro_wer": 0.2462,
+  "avg_latency_ms": 3.32,
+  "throughput_fps": 300.94,
+  "total_time_sec": 46.46
+}
