@@ -100,12 +100,13 @@ Start the production training run on the entire Kurdish dataset:
 python main.py train --epochs 40
 ```
 
-> **Note on Training Settings & Hardware Protection:**
-> - **Guaranteed Reserved Free RAM**: Automatically enforces a strict safety guard preserving **at least 15 GB (or 15% of total system RAM)** completely free for your browser, background apps, and OS tasks.
-> - **DataLoader Worker Throttle**: Capped at 4–6 workers on Windows to eliminate thread lock contention and prevent worker memory bloat while keeping GPU feed queues 100% saturated.
-> - **Auto-Tuned Batch Size**: Calibrated to fit comfortably inside dedicated VRAM (e.g. **256** on 8 GB RTX 5060, **128** on 6 GB RTX 4050, **384** on 12 GB, **512** on 16 GB+).
-> - **Mixed Precision (`amp_level: "O2"`)**: Enabled automatically on GPUs to maximize Tensor Core utilization and cut memory footprint in half.
-> - **Auto-Checkpoints**: Saved to `output/production_run/checkpoints/` (`best_accuracy.pdparams` and `latest.pdparams`).
+> **Full Hardware & Performance Control (Optimized for High-RAM & Multi-Core Workstations):**
+> - **Full Worker Freedom (`--workers <N>`)**: On high-RAM systems (e.g. 64 GB RAM, 32 CPU cores), pass `--workers 8`, `--workers 12`, `--workers 16`, or `--workers 24` to supercharge DataLoader throughput. Your explicit `--workers` setting is strictly honored without artificial throttling.
+> - **Batch Size Control (`--batch-size <N>` & `--eval-batch-size <N>`)**: Customize training and validation batch sizes (e.g. `--batch-size 256 --eval-batch-size 256` or `512` on RTX 5060).
+> - **Prediction & Image Resolution (`--image-shape <C,H,W>`)**: Adjust prediction input resolution (e.g. `--image-shape 3,48,320` or `--image-shape 3,48,640` for long Kurdish words) and `--max-text-length 64`.
+> - **Page-Locked CUDA Pinned Memory (`pin_memory`)**: Automatically active by default for direct zero-copy DMA streaming from host RAM to GPU VRAM.
+> - **Mixed Precision (`amp_level: "O2"`)**: Fully activates RTX Tensor Cores to maximize training throughput.
+> - **Auto-Checkpoints**: Best and latest weights continuously preserved in `output/production_run/checkpoints/`.
 
 ---
 
@@ -198,21 +199,24 @@ You can train completely for free on Google Colab:
 All scripts accept CLI arguments directly. For example:
 
 ```powershell
-# Custom Training:
-.\train.bat --epochs 50 --batch-size 256 --lr 0.0005
+# 1. High-RAM Multi-Core Workstation Training (e.g. 64GB RAM, 32 Cores, RTX 5060):
+.\train.bat --epochs 40 --batch-size 384 --eval-batch-size 256 --workers 16 --lr 0.001
 
-# Custom Pilot:
-.\pilot.bat --num-samples 1000 --max-epochs 3
+# 2. Ultra-Fast Pilot Convergence Test:
+.\pilot.bat --num-samples 1000 --max-epochs 3 --batch-size 128 --workers 8
 
-# Custom Inference:
-.\infer.bat --split test --count 20
-.\infer.bat --image path/to/my_image.png
+# 3. Custom Prediction Image Shape (e.g. Higher width for long Kurdish compound words):
+.\train.bat --image-shape 3,48,480 --max-text-length 48 --batch-size 256
+.\infer.bat --image-shape 3,48,480 --batch-size 64
 
-# Read Multi-page PDF or Scanned Book:
-.\read.bat -i book.pdf -o ./book_output --dpi 300
+# 4. Fast Batched Inference on Unseen Test Split:
+.\infer.bat --split test --count 50 --batch-size 64
 
-# Full Automated MLOps Pipeline:
-.\pipeline.bat --epochs 40 --batch-size 256
+# 5. Read Multi-Page PDF / High-Res Book with Sharp Detection:
+.\read.bat -i book.pdf -o ./book_output --det-limit-side-len 1600 --batch-size 64 --dpi 300
+
+# 6. Full Automated MLOps Pipeline:
+.\pipeline.bat --epochs 40 --batch-size 256 --workers 12
 ```
 
 ---

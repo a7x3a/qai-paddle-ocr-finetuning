@@ -142,20 +142,29 @@ def get_hardware_profile() -> HardwareProfile:
         recommended_amp = "O2"
 
     # Dataloader workers and Host RAM preservation:
-    # Explicitly enforce user requirement: ALWAYS keep at least 15 GB (or 15% of total RAM on high-RAM systems)
-    # completely free for other user applications, browser, and OS headroom.
-    if ram_gb >= 32.0:
-        reserved_free_ram_gb = max(15.0, round(ram_gb * 0.15, 1))
+    if ram_gb >= 48.0:
+        reserved_free_ram_gb = max(8.0, round(ram_gb * 0.10, 1))
+    elif ram_gb >= 32.0:
+        reserved_free_ram_gb = max(10.0, round(ram_gb * 0.15, 1))
     elif ram_gb >= 16.0:
         reserved_free_ram_gb = max(4.0, round(ram_gb * 0.25, 1))
     else:
         reserved_free_ram_gb = max(2.0, round(ram_gb * 0.20, 1))
 
     usable_ram_headroom = max(1.0, free_ram_gb - reserved_free_ram_gb)
-    ram_worker_cap = max(1, int(usable_ram_headroom // 1.5))
-    # Cap workers on Windows at 4 (or 6 on >=32 core beasts) to prevent thread contention & paging
-    max_workers_platform = 6 if (os.name == "nt" and ram_gb >= 32.0 and cpu_cores >= 16) else (4 if os.name == "nt" else 8)
-    cpu_cap = min(max_workers_platform, max(1, int(cpu_cores // 4)))
+    ram_worker_cap = max(1, int(usable_ram_headroom // 1.2))
+    # High-performance worker scaling for high-RAM workstations (e.g. 64GB RAM, 32 cores)
+    if os.name == "nt":
+        if ram_gb >= 48.0 and cpu_cores >= 16:
+            max_workers_platform = min(16, max(4, cpu_cores // 2))
+        elif ram_gb >= 32.0 and cpu_cores >= 8:
+            max_workers_platform = min(8, max(4, cpu_cores // 2))
+        else:
+            max_workers_platform = 4
+    else:
+        max_workers_platform = min(16, max(2, cpu_cores // 2))
+
+    cpu_cap = min(max_workers_platform, max(1, int(cpu_cores // 2)))
     recommended_workers = max(1, min(cpu_cap, ram_worker_cap))
 
     return HardwareProfile(

@@ -84,10 +84,13 @@ class PaddleConfigInjector:
             save_model_dir: Directory where model checkpoints will be written.
             pretrained_model_path: Optional base weights path without suffix.
             batch_size: Explicit batch size per GPU. If None, auto-detected from VRAM.
+            eval_batch_size: Explicit batch size for validation. If None, auto-detected.
             num_workers: DataLoader worker thread/process count.
             epoch_num: Optional override for total training epochs.
             learning_rate: Optional override for initial learning rate.
+            image_shape: Optional prediction/training image resolution [C,H,W] or string '3,48,320'.
             max_text_length: Maximum sequence length for recognition heads.
+            pin_memory: Whether to enable page-locked pinned memory in DataLoader (default: True).
             use_gpu: Whether to enforce GPU training (None for auto-detect).
 
         Returns:
@@ -115,9 +118,43 @@ class PaddleConfigInjector:
         # 1. Global updates
         cfg["Global"]["character_dict_path"] = str(dict_p)
         cfg["Global"]["save_model_dir"] = str(save_dir_p)
-        cfg["Global"]["max_text_length"] = max_text_length
+        if max_text_length is not None:
+            cfg["Global"]["max_text_length"] = max_text_length
         cfg["Global"]["save_res_path"] = str(save_dir_p / "predicts.txt")
         cfg["Global"]["save_inference_dir"] = str(save_dir_p / "inference")
+
+        # Parse and inject prediction image shape if provided
+        parsed_shape: Optional[list[int]] = None
+        if image_shape:
+            if isinstance(image_shape, str):
+                parts = [int(p.strip()) for p in image_shape.replace("[", "").replace("]", "").split(",") if p.strip()]
+                if len(parts) == 3:
+                    parsed_shape = parts
+            elif isinstance(image_shape, (list, tuple)) and len(image_shape) == 3:
+                parsed_shape = [int(p) for p in image_shape]
+
+        if parsed_shape:
+            c, h, w = parsed_shape
+            cfg["Global"]["d2s_train_image_shape"] = [c, h, w]
+            # Update Train transforms
+            if "Train" in cfg and "dataset" in cfg["Train"] and "transforms" in cfg["Train"]["dataset"]:
+                for t in cfg["Train"]["dataset"]["transforms"]:
+                    if isinstance(t, dict):
+                        if "RecConAug" in t:
+                            t["RecConAug"]["image_shape"] = [h, w, c]
+                            if max_text_length is not None:
+                                t["RecConAug"]["max_text_length"] = max_text_length
+                        elif "RecResizeImg" in t:
+                            t["RecResizeImg"]["image_shape"] = [c, h, w]
+            # Update Train MultiScaleSampler if applicable
+            if "Train" in cfg and "sampler" in cfg["Train"]:
+                if "scales" in cfg["Train"]["sampler"]:
+                    cfg["Train"]["sampler"]["scales"] = [[w, max(16, h - 16)], [w, h], [w, h + 16]]
+            # Update Eval transforms
+            if "Eval" in cfg and "dataset" in cfg["Eval"] and "transforms" in cfg["Eval"]["dataset"]:
+                for t in cfg["Eval"]["dataset"]["transforms"]:
+                    if isinstance(t, dict) and "RecResizeImg" in t:
+                        t["RecResizeImg"]["image_shape"] = [c, h, w]
 
         # Determine compute device
         has_cuda = bool(paddle.is_compiled_with_cuda() and paddle.device.cuda.device_count() > 0)
@@ -145,10 +182,12 @@ class PaddleConfigInjector:
         # 2. Hardware profile and allocation
         profile = get_hardware_profile()
         effective_bs = batch_size or profile.recommended_train_batch
+        # If user explicitly supplied workers, strictly honor it without clamping
         effective_workers = num_workers if num_workers is not None else profile.recommended_workers
+        effective_eval_bs = eval_batch_size or min(effective_bs, profile.recommended_eval_batch)
         logger.info(
-            f"Allocated parameters: Batch Size = {effective_bs}, Workers = {effective_workers} "
-            f"(Guaranteed Reserved Host RAM: {profile.reserved_free_ram_gb} GB)"
+            f"Allocated parameters: Train Batch = {effective_bs}, Eval Batch = {effective_eval_bs}, "
+            f"Workers = {effective_workers} (RAM Headroom: {profile.free_ram_gb:.1f} GB available)"
         )
 
         # Determine dataset root containing 'images'
@@ -171,6 +210,7 @@ class PaddleConfigInjector:
             if "loader" in cfg["Train"]:
                 cfg["Train"]["loader"]["batch_size_per_card"] = effective_bs
                 cfg["Train"]["loader"]["num_workers"] = effective_workers
+                cfg["Train"]["loader"]["pin_memory"] = pin_memory
             if "sampler" in cfg["Train"]:
                 cfg["Train"]["sampler"]["first_bs"] = effective_bs
 
@@ -178,18 +218,23 @@ class PaddleConfigInjector:
         if "Eval" in cfg:
             cfg["Eval"]["dataset"]["data_dir"] = val_data_dir
             cfg["Eval"]["dataset"]["label_file_list"] = [str(val_p).replace("\\", "/")]
-            eval_bs = min(effective_bs, profile.recommended_eval_batch)
             if "loader" in cfg["Eval"]:
-                cfg["Eval"]["loader"]["batch_size_per_card"] = eval_bs
-                cfg["Eval"]["loader"]["num_workers"] = max(1, effective_workers // 2)
+                cfg["Eval"]["loader"]["batch_size_per_card"] = effective_eval_bs
+                eval_workers = max(1, min(effective_workers, 8)) if num_workers is None else effective_workers
+                cfg["Eval"]["loader"]["num_workers"] = eval_workers
+                cfg["Eval"]["loader"]["pin_memory"] = pin_memory
 
-        # 5. Architecture Head classes
+        # 5. Architecture Head classes and max_text_length
         if "Architecture" in cfg and "Head" in cfg["Architecture"]:
             cfg["Architecture"]["Head"]["out_channels_list"] = {
                 "CTCLabelDecode": ctc_classes,
                 "SARLabelDecode": sar_classes,
                 "NRTRLabelDecode": ctc_classes + 3,
             }
+            if max_text_length is not None and "head_list" in cfg["Architecture"]["Head"]:
+                for head in cfg["Architecture"]["Head"]["head_list"]:
+                    if isinstance(head, dict) and "NRTRHead" in head:
+                        head["NRTRHead"]["max_text_length"] = max_text_length
 
         # 6. Optimizer LR update
         if learning_rate is not None and "Optimizer" in cfg and "lr" in cfg["Optimizer"]:

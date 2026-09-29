@@ -278,7 +278,13 @@ def handle_infer(args: argparse.Namespace) -> None:
         logger.error(f"Inference model files not found in: {model_dir}. Please run 'python main.py export' first.")
         sys.exit(1)
 
-    recognizer = Recognizer(model_dir, batch_size=args.batch_size, use_gpu=not args.no_gpu)
+    recognizer = Recognizer(
+        model_dir,
+        batch_size=args.batch_size,
+        use_gpu=not args.no_gpu,
+        image_shape=getattr(args, "image_shape", "3,48,320"),
+        max_text_length=getattr(args, "max_text_length", 32),
+    )
     samples: list[tuple[Path, str]] = []
 
     split_name = args.split or ("test" if not args.image else None)
@@ -412,6 +418,9 @@ def handle_pilot_run(args: argparse.Namespace) -> None:
         num_samples=args.num_samples,
         max_epochs=args.max_epochs,
         batch_size=args.batch_size,
+        num_workers=getattr(args, "workers", None),
+        image_shape=getattr(args, "image_shape", None),
+        max_text_length=getattr(args, "max_text_length", 32),
     )
     logger.info(f"Pilot run successfully concluded: {result}")
 
@@ -443,6 +452,10 @@ def handle_train(args: argparse.Namespace) -> None:
         logger.info(f"Auto-selected hardware-optimized batch size: {batch_size} (Device: {profile.gpu_name})")
 
     workers = getattr(args, "workers", None)
+    eval_bs = getattr(args, "eval_batch_size", None)
+    img_shape = getattr(args, "image_shape", None)
+    max_len = getattr(args, "max_text_length", None)
+    pin_mem = not getattr(args, "no_pin_memory", False)
 
     injector = PaddleConfigInjector(args.config)
     injector.inject_runtime_paths(
@@ -452,9 +465,13 @@ def handle_train(args: argparse.Namespace) -> None:
         save_model_dir=output_dir / "checkpoints",
         pretrained_model_path=args.pretrained_model,
         batch_size=batch_size,
+        eval_batch_size=eval_bs,
         num_workers=workers,
         epoch_num=args.epochs,
         learning_rate=args.lr,
+        image_shape=img_shape,
+        max_text_length=max_len,
+        pin_memory=pin_mem,
     )
     runtime_config_path = output_dir / "runtime_config.yml"
     injector.write_runtime_config(runtime_config_path)
@@ -505,6 +522,8 @@ def handle_benchmark_unseen(args: argparse.Namespace) -> None:
         model_dir=args.model_dir,
         batch_size=args.batch_size,
         use_gpu=not args.no_gpu,
+        image_shape=getattr(args, "image_shape", "3,48,320"),
+        max_text_length=getattr(args, "max_text_length", 32),
     )
     report = evaluator.evaluate(
         test_label_path=args.test_label,
@@ -584,6 +603,9 @@ def handle_pipeline(args: argparse.Namespace) -> None:
         num_samples=args.pilot_samples,
         max_epochs=args.pilot_epochs,
         batch_size=args.batch_size or 32,
+        num_workers=getattr(args, "workers", None),
+        image_shape=getattr(args, "image_shape", None),
+        max_text_length=getattr(args, "max_text_length", 32),
         max_eval_samples=args.eval_samples,
     )
     pilot_report_p = pilot_dir / "pilot_benchmark_report.json"
@@ -607,6 +629,10 @@ def handle_pipeline(args: argparse.Namespace) -> None:
     profile = get_hardware_profile()
     eff_bs = args.batch_size or profile.recommended_train_batch
     eff_workers = getattr(args, "workers", None) or profile.recommended_workers
+    eval_bs = getattr(args, "eval_batch_size", None)
+    img_shape = getattr(args, "image_shape", None)
+    max_len = getattr(args, "max_text_length", None)
+    pin_mem = not getattr(args, "no_pin_memory", False)
 
     injector = PaddleConfigInjector(args.config)
     injector.inject_runtime_paths(
@@ -616,9 +642,13 @@ def handle_pipeline(args: argparse.Namespace) -> None:
         save_model_dir=full_output_dir / "checkpoints",
         pretrained_model_path=args.pretrained_model,
         batch_size=eff_bs,
+        eval_batch_size=eval_bs,
         num_workers=eff_workers,
         epoch_num=args.epochs,
         learning_rate=args.lr,
+        image_shape=img_shape,
+        max_text_length=max_len,
+        pin_memory=pin_mem,
     )
     runtime_cfg = full_output_dir / "runtime_config.yml"
     injector.write_runtime_config(runtime_cfg)
@@ -660,7 +690,13 @@ def handle_pipeline(args: argparse.Namespace) -> None:
     from src.benchmark.unseen_evaluator import UnseenEvaluator
     test_label_p = Path("data/kurdish_rec/test_rec.txt").resolve()
     if test_label_p.is_file():
-        unseen_eval = UnseenEvaluator(model_dir=export_dir, batch_size=eff_bs, use_gpu=not args.no_gpu)
+        unseen_eval = UnseenEvaluator(
+            model_dir=export_dir,
+            batch_size=eff_bs,
+            use_gpu=not args.no_gpu,
+            image_shape=getattr(args, "image_shape", "3,48,320"),
+            max_text_length=getattr(args, "max_text_length", 32),
+        )
         unseen_rep = unseen_eval.evaluate(
             test_label_path=test_label_p,
             max_samples=args.eval_samples,
@@ -687,6 +723,10 @@ def handle_read(args: argparse.Namespace) -> None:
         rec_model_dir=args.model_dir,
         det_model_dir=args.det_model_dir,
         use_gpu=not args.no_gpu,
+        det_limit_side_len=getattr(args, "det_limit_side_len", 960),
+        rec_batch_size=getattr(args, "batch_size", 32),
+        rec_image_shape=getattr(args, "image_shape", "3,48,320"),
+        max_text_length=getattr(args, "max_text_length", 32),
     )
 
     target = Path(args.input).resolve()
@@ -826,6 +866,7 @@ def main() -> None:
     p_bench_base.add_argument("--config", type=str, default=default_bench_config, help="Model config YAML")
     p_bench_base.add_argument("--output-report", type=str, default="./output/base_benchmark_report.json", help="Report destination")
     p_bench_base.add_argument("--batch-size", type=int, default=32, help="Inference batch size")
+    p_bench_base.add_argument("--image-shape", type=str, default="3,48,320", help="Prediction image resolution 'C,H,W' (default: '3,48,320')")
     p_bench_base.add_argument("--max-samples", type=int, default=None, help="Limit maximum samples to benchmark (e.g. 100 for fast eval)")
     p_bench_base.add_argument("--version", type=str, default=None, help="Report version directory tag (e.g. '1' or 'v1')")
     p_bench_base.add_argument("--no-gpu", action="store_true", help="Run benchmark on CPU")
@@ -842,6 +883,9 @@ def main() -> None:
     p_pilot.add_argument("--num-samples", type=int, default=500, help="Number of pilot subset samples")
     p_pilot.add_argument("--max-epochs", type=int, default=2, help="Number of mini-epochs")
     p_pilot.add_argument("--batch-size", type=int, default=32, help="Batch size")
+    p_pilot.add_argument("--workers", type=int, default=None, help="DataLoader worker count (None for hardware auto-tune)")
+    p_pilot.add_argument("--image-shape", type=str, default="3,48,320", help="Prediction image resolution 'C,H,W' (default: '3,48,320')")
+    p_pilot.add_argument("--max-text-length", type=int, default=32, help="Maximum text character length (default: 32)")
     p_pilot.add_argument("--version", type=str, default=None, help="Report version directory tag (e.g. '1' or 'v1')")
     p_pilot.set_defaults(func=handle_pilot_run)
 
@@ -854,8 +898,12 @@ def main() -> None:
     p_train.add_argument("--val-label", type=str, default=default_val, help="Val labels")
     p_train.add_argument("--output-dir", type=str, default="./output/production_run", help="Output directory")
     p_train.add_argument("--epochs", type=int, default=40, help="Total training epochs (default: 40)")
-    p_train.add_argument("--batch-size", type=int, default=None, help="Batch size (None for auto-detection)")
+    p_train.add_argument("--batch-size", type=int, default=None, help="Training batch size per card (None for auto-detection)")
+    p_train.add_argument("--eval-batch-size", type=int, default=None, help="Validation evaluation batch size (None for auto-detection)")
     p_train.add_argument("--workers", type=int, default=None, help="DataLoader worker count (None for hardware auto-tune)")
+    p_train.add_argument("--image-shape", type=str, default="3,48,320", help="Model prediction & training input image resolution 'C,H,W' (default: '3,48,320')")
+    p_train.add_argument("--max-text-length", type=int, default=32, help="Maximum sequence text length (default: 32)")
+    p_train.add_argument("--no-pin-memory", action="store_true", help="Disable DataLoader page-locked pinned memory")
     p_train.add_argument("--lr", type=float, default=0.001, help="Initial learning rate")
     p_train.add_argument("--gpus", type=str, default="0", help="GPU indices (e.g. '0' or '0,1')")
     p_train.add_argument("--version", type=str, default=None, help="Report version directory tag (e.g. '1' or 'v1')")
@@ -886,6 +934,8 @@ def main() -> None:
     p_bench_unseen.add_argument("--test-label", type=str, default="data/kurdish_rec/test_rec.txt", help="Path to unseen test label file")
     p_bench_unseen.add_argument("--count", type=int, default=None, help="Sample count limit (default: all)")
     p_bench_unseen.add_argument("--batch-size", type=int, default=32, help="Inference batch size")
+    p_bench_unseen.add_argument("--image-shape", type=str, default="3,48,320", help="Prediction image resolution 'C,H,W' (default: '3,48,320')")
+    p_bench_unseen.add_argument("--max-text-length", type=int, default=32, help="Maximum text character length (default: 32)")
     p_bench_unseen.add_argument("--output-report", type=str, default=None, help="Optional JSON report output path")
     p_bench_unseen.add_argument("--version", type=str, default=None, help="Report version directory tag (e.g. '1' or 'v1')")
     p_bench_unseen.add_argument("--no-gpu", action="store_true", help="Run benchmark on CPU")
@@ -900,8 +950,12 @@ def main() -> None:
     p_pipe.add_argument("--train-label", type=str, default=default_train, help="Train labels")
     p_pipe.add_argument("--val-label", type=str, default=default_val, help="Val labels")
     p_pipe.add_argument("--epochs", type=int, default=40, help="Full training epochs (default: 40)")
-    p_pipe.add_argument("--batch-size", type=int, default=None, help="Batch size (None for hardware auto-tune)")
+    p_pipe.add_argument("--batch-size", type=int, default=None, help="Training batch size per card (None for auto-detection)")
+    p_pipe.add_argument("--eval-batch-size", type=int, default=None, help="Validation evaluation batch size (None for auto-detection)")
     p_pipe.add_argument("--workers", type=int, default=None, help="DataLoader worker count (None for hardware auto-tune)")
+    p_pipe.add_argument("--image-shape", type=str, default="3,48,320", help="Model prediction & training input image resolution 'C,H,W' (default: '3,48,320')")
+    p_pipe.add_argument("--max-text-length", type=int, default=32, help="Maximum text sequence length (default: 32)")
+    p_pipe.add_argument("--no-pin-memory", action="store_true", help="Disable DataLoader page-locked pinned memory")
     p_pipe.add_argument("--lr", type=float, default=0.001, help="Initial learning rate")
     p_pipe.add_argument("--pilot-samples", type=int, default=200, help="Pilot subset sample count (default: 200)")
     p_pipe.add_argument("--pilot-epochs", type=int, default=2, help="Pilot epochs (default: 2)")
@@ -916,6 +970,10 @@ def main() -> None:
     p_read.add_argument("--output-dir", "-o", type=str, default="./extracted_documents", help="Destination folder for text/markdown/visualizations")
     p_read.add_argument("--model-dir", type=str, default=default_infer_model, help="Recognition model directory")
     p_read.add_argument("--det-model-dir", type=str, default="assets/base_det_inference", help="Detection model directory")
+    p_read.add_argument("--batch-size", type=int, default=32, help="Text recognition batch size (default: 32)")
+    p_read.add_argument("--image-shape", type=str, default="3,48,320", help="Recognition image resolution 'C,H,W' (default: '3,48,320')")
+    p_read.add_argument("--max-text-length", type=int, default=32, help="Maximum text character length (default: 32)")
+    p_read.add_argument("--det-limit-side-len", type=int, default=960, help="Detection resolution limit (default: 960, e.g. 1600 for high-res scans)")
     p_read.add_argument("--dpi", type=int, default=200, help="Rendering resolution for PDF pages (default: 200)")
     p_read.add_argument("--min-score", type=float, default=0.3, help="Minimum confidence threshold (default: 0.3)")
     p_read.add_argument("--max-pages", type=int, default=None, help="Maximum pages to process")
@@ -930,6 +988,8 @@ def main() -> None:
     p_infer.add_argument("--split", choices=["train", "val", "test"], default=None, help="Benchmark split to run recognition on")
     p_infer.add_argument("--count", type=int, default=10, help="Number of split images to test (default: 10)")
     p_infer.add_argument("--batch-size", type=int, default=16, help="Inference batch size")
+    p_infer.add_argument("--image-shape", type=str, default="3,48,320", help="Prediction image resolution 'C,H,W' (default: '3,48,320')")
+    p_infer.add_argument("--max-text-length", type=int, default=32, help="Maximum text character length (default: 32)")
     p_infer.add_argument("--no-gpu", action="store_true", help="Force CPU inference")
     p_infer.set_defaults(func=handle_infer)
 

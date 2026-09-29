@@ -107,6 +107,9 @@ class PilotRunner:
         num_samples: int = 500,
         max_epochs: int = 2,
         batch_size: int = 32,
+        num_workers: Optional[int] = None,
+        image_shape: Optional[Union[str, list[int]]] = None,
+        max_text_length: Optional[int] = 32,
         pretrained_model_path: Optional[Union[str, Path]] = None,
         max_eval_samples: Optional[int] = 200,
     ) -> dict[str, Any]:
@@ -121,6 +124,9 @@ class PilotRunner:
             num_samples: Number of samples in pilot subset.
             max_epochs: Number of pilot training epochs (typically 1 or 2).
             batch_size: Batch size per iteration.
+            num_workers: Number of DataLoader workers.
+            image_shape: Image resolution [C,H,W].
+            max_text_length: Maximum sequence length.
             pretrained_model_path: Optional path to base pretrained checkpoint.
 
         Returns:
@@ -155,7 +161,9 @@ class PilotRunner:
             pretrained_model_path=pretrained_model_path,
             batch_size=batch_size,
             epoch_num=max_epochs,
-            num_workers=2,
+            num_workers=num_workers,
+            image_shape=image_shape,
+            max_text_length=max_text_length,
         )
 
         pilot_config_path = pilot_dir / "pilot_runtime_config.yml"

@@ -129,11 +129,19 @@ class UnseenEvaluator:
         model_dir: Union[str, Path] = "export/kurdish_final",
         batch_size: int = 32,
         use_gpu: bool = True,
+        image_shape: str = "3,48,320",
+        max_text_length: int = 32,
     ) -> None:
         self.model_dir = Path(model_dir).resolve()
         self.batch_size = batch_size
         self.use_gpu = use_gpu
-        self.recognizer = Recognizer(self.model_dir, batch_size=batch_size, use_gpu=use_gpu)
+        self.recognizer = Recognizer(
+            self.model_dir,
+            batch_size=batch_size,
+            use_gpu=use_gpu,
+            image_shape=image_shape,
+            max_text_length=max_text_length,
+        )
 
     def evaluate(
         self,

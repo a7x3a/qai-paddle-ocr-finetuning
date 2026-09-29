@@ -146,6 +146,9 @@ class DocumentReader:
         det_model_dir: Union[str, Path] = "assets/base_det_inference",
         use_gpu: bool = True,
         det_limit_side_len: int = 960,
+        rec_batch_size: int = 32,
+        rec_image_shape: str = "3,48,320",
+        max_text_length: int = 32,
     ) -> None:
         self.rec_model_p = Path(rec_model_dir).resolve()
         self.det_model_p = Path(det_model_dir).resolve()
@@ -162,7 +165,7 @@ class DocumentReader:
                 f"Detection model not found: {self.det_model_p}. Ensure assets/base_det_inference is present."
             )
 
-        logger.info(f"Loading Text Detector from {self.det_model_p.name}...")
+        logger.info(f"Loading Text Detector from {self.det_model_p.name} (det_limit_side_len={det_limit_side_len})...")
         try:
             from src.utils.pir_compat import self_heal_pir_inference_model
             self_heal_pir_inference_model(self.det_model_p)
@@ -171,6 +174,7 @@ class DocumentReader:
             pass
         args = init_args().parse_args([])
         args.det_model_dir = str(self.det_model_p)
+        args.det_limit_side_len = det_limit_side_len
         try:
             self.detector = predict_det.TextDetector(args)
         except ValueError as e:
@@ -182,8 +186,14 @@ class DocumentReader:
             else:
                 raise
 
-        logger.info(f"Loading Kurdish Recognizer from {self.rec_model_p.name}...")
-        self.recognizer = Recognizer(self.rec_model_p, use_gpu=use_gpu)
+        logger.info(f"Loading Kurdish Recognizer from {self.rec_model_p.name} (batch={rec_batch_size}, shape={rec_image_shape})...")
+        self.recognizer = Recognizer(
+            self.rec_model_p,
+            batch_size=rec_batch_size,
+            use_gpu=use_gpu,
+            image_shape=rec_image_shape,
+            max_text_length=max_text_length,
+        )
 
     @staticmethod
     def _detect_columns(boxes: list[np.ndarray], img_width: int) -> list[tuple[int, list[np.ndarray]]]:
