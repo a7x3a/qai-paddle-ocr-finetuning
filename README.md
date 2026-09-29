@@ -179,24 +179,124 @@ You can train completely for free on Google Colab:
 
 ---
 
-## All Commands Cheat Sheet
+## All Commands Reference & Execution Times
 
-| Task | CLI Command | 1-Click Windows Shortcut |
-| :--- | :--- | :--- |
-| **Setup Everything** | `setup.bat` (Win) or `bash scripts/setup.sh` (Linux) | Double-click `setup.bat` |
-| **Verify Hardware & VRAM** | `python main.py smoke-test` | Double-click `smoke.bat` |
-| **Baseline Zero-Shot Benchmark** | `python main.py benchmark-base --max-samples 100` | Double-click `benchmark.bat` |
-| **Mini Pilot Test (1 min)** | `python main.py pilot-run --num-samples 500` | Double-click `pilot.bat` |
-| **Full Production Fine-Tuning** | `python main.py train --epochs 40` | Double-click `train.bat` |
-| **Export Trained Model** | `python main.py export` | Double-click `export.bat` |
-| **Test OCR on Images** | `python main.py infer` (or `--split test --count 10`) | Double-click `infer.bat` |
-| **Read Full Page / Book / PDF** | `python main.py read -i my_book.pdf -o ./extracted` | `read.bat -i my_book.pdf` |
-| **End-to-End Automated Pipeline** | `python main.py pipeline --epochs 40` | Double-click `pipeline.bat` |
-| **Interactive Web Studio** *(Visual/Parsing)* | `python main.py serve` | Double-click `studio.bat` |
+Each command has a **1-click Windows runner (`.bat`)** that automatically runs in `.venv` without manual activation:
 
-### CLI Customization Options
+| Command & Shortcut | What It Does (Simple Explanation) | Estimated Time *(RTX 5060 / 32 cores / 64GB RAM)* | Output Folder (Versioned) |
+| :--- | :--- | :---: | :--- |
+| **`setup.bat`**<br>`python main.py setup` | Installs Python, C++ runtimes, PaddlePaddle-GPU, clones PaddleOCR, downloads base models & extracts dataset | ~2–5 min | `.venv/`, `data/`, `pretrain_models/` |
+| **`smoke.bat`**<br>`python main.py smoke-test` | Fast hardware pre-flight test. Verifies CUDA GPU device, VRAM allocation, and runs a 1-step backward gradient pass | ~10–15 sec | Terminal (pass/fail verification) |
+| **`benchmark.bat`**<br>`python main.py benchmark-base` | Evaluates un-finetuned foundation model zero-shot on Kurdish validation set to establish baseline accuracy | ~30–60 sec | `benchmarks/v{n}/baseline/` |
+| **`pilot.bat`**<br>`python main.py pilot-run` | Rapid convergence test on a small subset (500 samples, 2 epochs). Verifies loss drop and checkpoint saving | ~1–2 min | `outputs/v{n}/pilot/`<br>`benchmarks/v{n}/pilot/` |
+| **`train.bat`**<br>`python main.py train` | Full production fine-tuning on entire dataset (40 epochs) with cosine decay learning rate and auto-checkpoints | ~15–30 min | `outputs/v{n}/production_run/`<br>`checkpoints/` |
+| **`export.bat`**<br>`python main.py export` | Converts best trained checkpoint (`best_accuracy.pdparams`) into lightweight deployable PIR inference model | ~5–10 sec | `export/v{n}/`<br>`export/kurdish_final/` |
+| **`infer.bat`**<br>`python main.py infer` | Runs text recognition inference on sample images or unseen test splits with ground truth comparisons | ~2–5 sec | Terminal table (Accuracy & CER) |
+| **`read.bat`**<br>`python main.py read` | Full-page PDF or book OCR with DBNet text detection and Right-to-Left (RTL) column-aware sorting | ~5–15 sec / page | `extracted_documents/`<br>(`.md`, `.txt`, `.json`) |
+| **`pipeline.bat`**<br>`python main.py pipeline` | **1-Click Automated Pipeline**: Executes all 7 stages end-to-end unattended with automatic versioning | ~18–35 min *(total)* | `benchmarks/v{n}/`<br>`outputs/v{n}/`<br>`export/v{n}/` |
 
-All scripts accept CLI arguments directly. For example:
+---
+
+## 🚀 1-Click Automated End-to-End Pipeline (`pipeline.bat`)
+
+If you want to run the entire fine-tuning and benchmarking process from start to finish without typing commands manually, use the automated pipeline:
+
+```powershell
+# Windows 1-click shortcut:
+.\pipeline.bat --epochs 40 --batch-size 384 --workers 16
+
+# Or standard CLI:
+python main.py pipeline --epochs 40 --batch-size 384 --workers 16
+```
+
+### What Happens Automatically (7 Stages):
+1. **[STAGE 1/7] Pre-Flight Smoke Test** (~10 sec): Verifies GPU compute capability, CUDA runtime, and autograd graph.
+2. **[STAGE 2/7] Baseline Benchmark** (~40 sec): Evaluates foundation model zero-shot accuracy to record pre-training metrics.
+3. **[STAGE 3/7] Pilot Convergence Run** (~1 min): Trains 2 mini-epochs on 200 samples to verify loss drop.
+4. **[STAGE 4/7] Full Production Training** (~15-25 min): Trains across all 40 epochs on 162,000+ Kurdish lines using pinned memory and mixed precision.
+5. **[STAGE 5/7] Checkpoint Auto-Benchmarking** (~1 min): Tests all saved checkpoints and selects the model with the highest exact accuracy.
+6. **[STAGE 6/7] Deployable Model Export** (~10 sec): Converts best checkpoint to PIR inference format and updates `export/kurdish_final`.
+7. **[STAGE 7/7] Unseen Generalization Benchmark** (~40 sec): Evaluates the exported model against unseen Kurdish, Arabic, and Numeric test data.
+
+### Automatic Version Naming & Folder Organization:
+Each time you run the pipeline, it automatically increments version folders (`v1`, `v2`, `v3`...):
+
+```
+├── benchmarks/v{n}/                  # Benchmark reports & leaderboards
+│   ├── leaderboard.md                # Markdown leaderboard comparing Baseline vs Pilot vs All Epochs vs Unseen
+│   ├── summary.json                  # Aggregated JSON metrics across all stages
+│   ├── baseline/                     # Zero-shot baseline reports (.json & .md)
+│   ├── pilot/                        # Mini-run convergence reports (.json & .md)
+│   ├── full/                         # Per-epoch checkpoint evaluations (.json & .md)
+│   └── unseen/                       # Multilingual generalization report (.json & .md)
+│
+├── outputs/v{n}/                     # Training checkpoints & runtime configs
+│   ├── pilot/                        # Pilot run checkpoints & labels
+│   └── production_run/
+│       ├── checkpoints/              # iter_epoch_*.pdparams, best_accuracy.pdparams, latest.pdparams
+│       └── runtime_config.yml        # Exact YAML config used for this run
+│
+└── export/v{n}/                      # Deployable inference model
+    ├── inference.json                # PIR Model architecture graph
+    ├── inference.pdiparams           # Optimized inference weights
+    ├── inference.yml                 # Inference metadata
+    └── arabic_kurdish_dict.txt       # 747-character Kurdish dictionary
+```
+*(The latest active model is also mirrored to `export/kurdish_final/` for instant inference).*
+
+---
+
+## 🛠️ Step-by-Step Manual Workflow (Alternative to Automated Pipeline)
+
+If you prefer executing each step manually instead of running the automated pipeline:
+
+1. **Verify Hardware**:
+   ```powershell
+   .\smoke.bat
+   ```
+   *Time: ~10 seconds. Confirms GPU is detected.*
+
+2. **Measure Zero-Shot Baseline**:
+   ```powershell
+   .\benchmark.bat --max-samples 100
+   ```
+   *Time: ~30 seconds. Measures accuracy of foundation model before Kurdish adaptation (~18%).*
+
+3. **Run Pilot Convergence Check**:
+   ```powershell
+   .\pilot.bat --num-samples 500 --batch-size 128
+   ```
+   *Time: ~1 minute. Verifies learning rate and loss drop.*
+
+4. **Production Fine-Tuning**:
+   ```powershell
+   .\train.bat --epochs 40 --batch-size 384 --workers 16
+   ```
+   *Time: ~15-30 minutes on RTX 5060 (64GB RAM). Saves checkpoints in `outputs/production_run/checkpoints/`.*
+
+5. **Export Best Model**:
+   ```powershell
+   .\export.bat
+   ```
+   *Time: ~10 seconds. Exports best model into `export/kurdish_final/`.*
+
+6. **Test Inference**:
+   ```powershell
+   .\infer.bat --split test --count 10
+   ```
+   *Time: ~3 seconds. Displays predictions vs. expected ground truth.*
+
+7. **Full-Page / Book OCR**:
+   ```powershell
+   .\read.bat -i my_document.pdf -o ./extracted_book
+   ```
+   *Time: ~5-15 seconds per page.*
+
+---
+
+## CLI Customization Options
+
+All scripts accept CLI arguments directly to take full advantage of your workstation hardware:
 
 ```powershell
 # 1. High-RAM Multi-Core Workstation Training (e.g. 64GB RAM, 32 Cores, RTX 5060):
@@ -216,7 +316,7 @@ All scripts accept CLI arguments directly. For example:
 .\read.bat -i book.pdf -o ./book_output --det-limit-side-len 1600 --batch-size 64 --dpi 300
 
 # 6. Full Automated MLOps Pipeline:
-.\pipeline.bat --epochs 40 --batch-size 256 --workers 12
+.\pipeline.bat --epochs 40 --batch-size 384 --workers 16
 ```
 
 ---

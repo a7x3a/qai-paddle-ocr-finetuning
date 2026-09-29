@@ -1,0 +1,183 @@
+{
+  "version": "v1",
+  "version_dir": "C:\\Users\\A\\Desktop\\Tools - QAI Enviroment\\qai-ocr\\qai-paddle-ocr-finetuning-main\\reports\\benchmarking\\v1",
+  "stages_completed": {
+    "baseline": true,
+    "pilot": true,
+    "full": true,
+    "unseen": true
+  },
+  "best_accuracy": 0.7535,
+  "leaderboard": [
+    {
+      "stage": "1. Baseline (Zero-Shot)",
+      "checkpoint": "arabic_PP-OCRv5_mobile_rec_pretrained.pdparams",
+      "accuracy": 0.1839,
+      "macro_cer": 0.8256,
+      "micro_cer": 0.6057,
+      "macro_wer": 0.8247,
+      "micro_wer": 0.8207,
+      "latency_ms": 3.22,
+      "fps": 310.08,
+      "is_best": false
+    },
+    {
+      "stage": "2. Pilot Run (Convergence)",
+      "checkpoint": "iter_epoch_1.pdparams",
+      "accuracy": 0.235,
+      "macro_cer": 0.3747,
+      "micro_cer": 0.3313,
+      "macro_wer": 0.84,
+      "micro_wer": 0.7328,
+      "latency_ms": 12.53,
+      "fps": 79.83,
+      "is_best": false
+    },
+    {
+      "stage": "3. Full Best Accuracy",
+      "checkpoint": "best_accuracy.pdparams",
+      "accuracy": 0.7535,
+      "macro_cer": 0.2062,
+      "micro_cer": 0.4202,
+      "macro_wer": 0.2461,
+      "micro_wer": 0.2462,
+      "latency_ms": 3.32,
+      "fps": 300.94,
+      "is_best": true
+    },
+    {
+      "stage": "3. Full Epoch 1",
+      "checkpoint": "iter_epoch_1.pdparams",
+      "accuracy": 0.7429,
+      "macro_cer": 0.22,
+      "micro_cer": 0.4261,
+      "macro_wer": 0.2567,
+      "micro_wer": 0.2568,
+      "latency_ms": 3.25,
+      "fps": 307.77,
+      "is_best": false
+    },
+    {
+      "stage": "3. Full Epoch 2",
+      "checkpoint": "iter_epoch_2.pdparams",
+      "accuracy": 0.7336,
+      "macro_cer": 0.2228,
+      "micro_cer": 0.4381,
+      "macro_wer": 0.2655,
+      "micro_wer": 0.2663,
+      "latency_ms": 3.27,
+      "fps": 305.74,
+      "is_best": false
+    },
+    {
+      "stage": "3. Full Epoch 3",
+      "checkpoint": "iter_epoch_3.pdparams",
+      "accuracy": 0.7373,
+      "macro_cer": 0.2191,
+      "micro_cer": 0.4267,
+      "macro_wer": 0.2631,
+      "micro_wer": 0.2629,
+      "latency_ms": 3.26,
+      "fps": 306.88,
+      "is_best": false
+    },
+    {
+      "stage": "3. Full Epoch 4",
+      "checkpoint": "iter_epoch_4.pdparams",
+      "accuracy": 0.629,
+      "macro_cer": 0.3108,
+      "micro_cer": 0.5307,
+      "macro_wer": 0.371,
+      "micro_wer": 0.3804,
+      "latency_ms": 3.29,
+      "fps": 303.92,
+      "is_best": false
+    },
+    {
+      "stage": "3. Full Epoch 5",
+      "checkpoint": "iter_epoch_5.pdparams",
+      "accuracy": 0.7525,
+      "macro_cer": 0.203,
+      "micro_cer": 0.4159,
+      "macro_wer": 0.2483,
+      "micro_wer": 0.2476,
+      "latency_ms": 3.21,
+      "fps": 311.89,
+      "is_best": false
+    },
+    {
+      "stage": "3. Full Latest",
+      "checkpoint": "latest.pdparams",
+      "accuracy": 0.7525,
+      "macro_cer": 0.203,
+      "micro_cer": 0.4159,
+      "macro_wer": 0.2483,
+      "micro_wer": 0.2476,
+      "latency_ms": 3.2,
+      "fps": 312.45,
+      "is_best": false
+    }
+  ],
+  "unseen_evaluation": {
+    "model_name": "kurdish_final",
+    "model_path": "C:\\Users\\A\\Desktop\\Tools - QAI Enviroment\\qai-ocr\\qai-paddle-ocr-finetuning-main\\export\\kurdish_final",
+    "test_file": "C:\\Users\\A\\Desktop\\Tools - QAI Enviroment\\qai-ocr\\qai-paddle-ocr-finetuning-main\\data\\kurdish_rec\\test_rec.txt",
+    "total_samples": 1000,
+    "overall_accuracy": 0.892,
+    "overall_cer": 0.0813,
+    "overall_wer": 0.1083,
+    "avg_latency_ms": 3.29,
+    "throughput_fps": 304.04,
+    "categories": {
+      "OVERALL": {
+        "category": "OVERALL",
+        "samples": 1000,
+        "exact_match_acc": 0.892,
+        "cer": 0.0813,
+        "wer": 0.1083,
+        "avg_confidence": 0.9332
+      },
+      "KURDISH": {
+        "category": "KURDISH",
+        "samples": 357,
+        "exact_match_acc": 0.888,
+        "cer": 0.0855,
+        "wer": 0.112,
+        "avg_confidence": 0.9525
+      },
+      "ARABIC": {
+        "category": "ARABIC",
+        "samples": 307,
+        "exact_match_acc": 0.8436,
+        "cer": 0.1056,
+        "wer": 0.1564,
+        "avg_confidence": 0.8951
+      },
+      "ENGLISH": {
+        "category": "ENGLISH",
+        "samples": 26,
+        "exact_match_acc": 0.5,
+        "cer": 0.1135,
+        "wer": 0.5,
+        "avg_confidence": 0.9149
+      },
+      "NUMERIC": {
+        "category": "NUMERIC",
+        "samples": 309,
+        "exact_match_acc": 0.9773,
+        "cer": 0.0251,
+        "wer": 0.0254,
+        "avg_confidence": 0.952
+      },
+      "OTHER": {
+        "category": "OTHER",
+        "samples": 1,
+        "exact_match_acc": 1.0,
+        "cer": 0.0,
+        "wer": 0.0,
+        "avg_confidence": 0.3622
+      }
+    },
+    "created_at": "2026-09-29 10:26:34"
+  }
+}

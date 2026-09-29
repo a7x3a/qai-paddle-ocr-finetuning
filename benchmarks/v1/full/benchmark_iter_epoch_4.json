@@ -1,0 +1,13 @@
+{
+  "checkpoint_path": "E:\\qai-paddle-ocr-finetuning\\output\\production_run\\checkpoints\\iter_epoch_4.pdparams",
+  "total_samples": 13981,
+  "exact_matches": 8794,
+  "accuracy": 0.629,
+  "macro_cer": 0.3108,
+  "micro_cer": 0.5307,
+  "macro_wer": 0.371,
+  "micro_wer": 0.3804,
+  "avg_latency_ms": 3.29,
+  "throughput_fps": 303.92,
+  "total_time_sec": 46.0
+}

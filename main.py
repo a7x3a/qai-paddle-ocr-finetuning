@@ -441,7 +441,13 @@ def handle_pilot_run(args: argparse.Namespace) -> None:
 def handle_train(args: argparse.Namespace) -> None:
     """Execute full fine-tuning training and auto-benchmark generated checkpoints."""
     logger.info("Preparing production fine-tuning run...")
+    version_tag = getattr(args, "version", None)
     output_dir = Path(args.output_dir).resolve()
+    v_num = None
+    if version_tag is not None and args.output_dir == "./output/production_run":
+        cleaned = str(version_tag).lower().lstrip("v")
+        v_num = int(cleaned) if cleaned.isdigit() else version_tag
+        output_dir = Path(f"./output/v{v_num}/production_run").resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
 
     batch_size = args.batch_size
@@ -486,7 +492,12 @@ def handle_train(args: argparse.Namespace) -> None:
         auto_benchmark=True,
     )
 
-    if getattr(args, "version", None) is not None:
+    if version_tag is not None:
+        outputs_v = Path(f"./outputs/v{v_num}/production_run").resolve()
+        try:
+            shutil.copytree(str(output_dir), str(outputs_v), dirs_exist_ok=True)
+        except Exception:
+            pass
         reporter = BenchmarkingReporter(version=args.version)
         reporter.record_full_checkpoints(
             checkpoints_dir=output_dir / "checkpoints",
@@ -540,19 +551,26 @@ def handle_benchmark_unseen(args: argparse.Namespace) -> None:
 
 def handle_pipeline(args: argparse.Namespace) -> None:
     """Execute complete end-to-end automated fine-tuning pipeline:
-    Smoke Test -> Baseline Benchmark -> Pilot Run -> Full Training -> Checkpoint Benchmarking -> Export.
-    Generates unified comparison leaderboard in reports/benchmarking/v{version}/.
+    Smoke Test -> Baseline Benchmark -> Pilot Run -> Full Training -> Checkpoint Benchmarking -> Export -> Unseen Generalization.
+    Generates unified comparison leaderboard in benchmarks/v{version}/ and reports/benchmarking/v{version}/.
     """
     version_num, version_dir = resolve_report_dir(getattr(args, "version", None))
+    benchmarks_v_dir = Path(f"./benchmarks/v{version_num}").resolve()
+    output_v_dir = Path(f"./output/v{version_num}").resolve()
+    outputs_v_dir = Path(f"./outputs/v{version_num}").resolve()
+    export_v_dir = Path(f"./export/v{version_num}").resolve()
+
     logger.info("=" * 75)
     logger.info(f"🚀 INITIATING AUTOMATED KURDISH PADDLEOCR PIPELINE (VERSION: v{version_num})")
-    logger.info(f"📁 Benchmark artifacts will be stored in: {version_dir}")
+    logger.info(f"📊 Benchmarks Directory : {benchmarks_v_dir}")
+    logger.info(f"📁 Outputs Directory    : {outputs_v_dir}")
+    logger.info(f"📦 Export Directory     : {export_v_dir}")
     logger.info("=" * 75)
 
     reporter = BenchmarkingReporter(version=version_num)
 
     # Stage 1: Smoke Test
-    logger.info("\n[STAGE 1/5] Executing Pre-Training Smoke Test...")
+    logger.info("\n[STAGE 1/7] Executing Pre-Training Smoke Test...")
     tester = SmokeTester(use_gpu=not args.no_gpu)
     tester.run_all(
         config_path=args.config,
@@ -562,7 +580,7 @@ def handle_pipeline(args: argparse.Namespace) -> None:
     logger.info(" Stage 1 (Smoke Test) passed successfully.")
 
     # Stage 2: Baseline Benchmark (Foundation Model Zero-Shot)
-    logger.info("\n[STAGE 2/5] Evaluating Baseline Foundation Model...")
+    logger.info("\n[STAGE 2/7] Evaluating Baseline Foundation Model...")
     engine = BenchmarkEngine(
         config_path=args.config,
         dict_path=args.dict_path,
@@ -591,8 +609,8 @@ def handle_pipeline(args: argparse.Namespace) -> None:
     logger.info(f" Stage 2 (Baseline) completed: Exact Match = {base_res.accuracy * 100:.2f}%, CER = {base_res.macro_cer * 100:.2f}%")
 
     # Stage 3: Pilot Run (Convergence on mini subset)
-    logger.info("\n[STAGE 3/5] Starting Pilot Convergence Run...")
-    pilot_dir = Path(f"./output/v{version_num}/pilot").resolve()
+    logger.info("\n[STAGE 3/7] Starting Pilot Convergence Run...")
+    pilot_dir = output_v_dir / "pilot"
     pilot_runner = PilotRunner()
     pilot_res = pilot_runner.run_pilot(
         template_config_path=args.config,
@@ -608,6 +626,11 @@ def handle_pipeline(args: argparse.Namespace) -> None:
         max_text_length=getattr(args, "max_text_length", 32),
         max_eval_samples=args.eval_samples,
     )
+    try:
+        shutil.copytree(str(pilot_dir), str(outputs_v_dir / "pilot"), dirs_exist_ok=True)
+    except Exception:
+        pass
+
     pilot_report_p = pilot_dir / "pilot_benchmark_report.json"
     if pilot_report_p.is_file():
         import json
@@ -621,8 +644,8 @@ def handle_pipeline(args: argparse.Namespace) -> None:
     logger.info(f" Stage 3 (Pilot Run) completed: Exact Match = {pilot_res.accuracy * 100:.2f}%, CER = {pilot_res.macro_cer * 100:.2f}%")
 
     # Stage 4: Full Fine-Tuning (Continual learning without forgetting)
-    logger.info(f"\n[STAGE 4/5] Initiating Full Production Training ({args.epochs} epochs)...")
-    full_output_dir = Path(f"./output/v{version_num}/production_run").resolve()
+    logger.info(f"\n[STAGE 4/7] Initiating Full Production Training ({args.epochs} epochs)...")
+    full_output_dir = output_v_dir / "production_run"
     full_output_dir.mkdir(parents=True, exist_ok=True)
 
     from src.utils.hardware import get_hardware_profile
@@ -662,16 +685,24 @@ def handle_pipeline(args: argparse.Namespace) -> None:
         gpus=args.gpus,
         auto_benchmark=True,
     )
+
+    try:
+        shutil.copytree(str(full_output_dir), str(outputs_v_dir / "production_run"), dirs_exist_ok=True)
+    except Exception:
+        pass
+
+    # Stage 5: Checkpoints Benchmarking
+    logger.info("\n[STAGE 5/7] Evaluating & Benchmarking Saved Checkpoints...")
     reporter.record_full_checkpoints(
         checkpoints_dir=full_output_dir / "checkpoints",
         benchmark_results=benchmark_results,
     )
-    logger.info(" Stage 4 & 5 (Training & Checkpoints Benchmarking) completed.")
+    logger.info(" Stage 5 (Checkpoints Benchmarking) completed.")
 
     # Stage 6: Export & Final Leaderboard
-    logger.info("\n[STAGE 6/6] Exporting Best Checkpoint to Inference Model...")
+    logger.info("\n[STAGE 6/7] Exporting Best Checkpoint to Inference Model...")
     exporter = ModelExporter()
-    export_dir = Path(f"./export/v{version_num}").resolve()
+    export_dir = export_v_dir
     exporter.export(
         checkpoint_path=full_output_dir / "checkpoints" / "best_accuracy",
         config_path=runtime_cfg,
@@ -707,9 +738,10 @@ def handle_pipeline(args: argparse.Namespace) -> None:
     lead_md, sum_json = reporter.update_leaderboard()
     logger.info("=" * 75)
     logger.info("🎉 PIPELINE RUN COMPLETED SUCCESSFULLY!")
-    logger.info(f"📊 Leaderboard Report : {lead_md}")
-    logger.info(f"📈 Summary JSON       : {sum_json}")
-    logger.info(f"📦 Exported Model     : {export_dir}")
+    logger.info(f"📊 Benchmarks Folder : {benchmarks_v_dir} (and reports/benchmarking/v{version_num})")
+    logger.info(f"📁 Outputs Folder    : {outputs_v_dir} (and {output_v_dir})")
+    logger.info(f"📦 Exported Models   : {export_dir} & {Path('./export/kurdish_final').resolve()}")
+    logger.info(f"📈 Leaderboard File  : {benchmarks_v_dir / 'leaderboard.md'}")
     logger.info("=" * 75)
     if lead_md.is_file():
         print("\n" + lead_md.read_text(encoding="utf-8") + "\n")

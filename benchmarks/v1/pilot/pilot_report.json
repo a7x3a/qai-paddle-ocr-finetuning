@@ -1,0 +1,13 @@
+{
+  "checkpoint_path": "C:\\Users\\A\\Desktop\\Tools - QAI Enviroment\\qai-ocr\\qai-paddle-ocr-finetuning\\output\\pilot\\pilot_run\\checkpoints\\iter_epoch_1.pdparams",
+  "total_samples": 200,
+  "exact_matches": 47,
+  "accuracy": 0.235,
+  "macro_cer": 0.3747,
+  "micro_cer": 0.3313,
+  "macro_wer": 0.84,
+  "micro_wer": 0.7328,
+  "avg_latency_ms": 12.53,
+  "throughput_fps": 79.83,
+  "total_time_sec": 2.51
+}

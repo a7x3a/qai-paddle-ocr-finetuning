@@ -33,19 +33,25 @@ logger = setup_logger("BenchmarkingReporter")
 
 
 def get_next_report_version(base_reports_dir: Union[str, Path] = "reports/benchmarking") -> int:
-    """Scan existing reports/benchmarking/v* directories and return next version integer."""
-    base_p = Path(base_reports_dir).resolve()
-    base_p.mkdir(parents=True, exist_ok=True)
-
+    """Scan existing reports/benchmarking/v*, benchmarks/v*, and outputs/v* directories and return next version integer."""
+    candidates = [
+        Path(base_reports_dir).resolve(),
+        Path("benchmarks").resolve(),
+        Path("outputs").resolve(),
+        Path("output").resolve(),
+        Path("export").resolve(),
+    ]
     max_v = 0
-    for child in base_p.iterdir():
-        if child.is_dir() and re.match(r"^v\d+$", child.name, re.IGNORECASE):
-            try:
-                v_num = int(child.name[1:])
-                if v_num > max_v:
-                    max_v = v_num
-            except ValueError:
-                pass
+    for p in candidates:
+        if p.is_dir():
+            for child in p.iterdir():
+                if child.is_dir() and re.match(r"^v\d+$", child.name, re.IGNORECASE):
+                    try:
+                        v_num = int(child.name[1:])
+                        if v_num > max_v:
+                            max_v = v_num
+                    except ValueError:
+                        pass
     return max_v + 1 if max_v > 0 else 1
 
 
@@ -53,7 +59,7 @@ def resolve_report_dir(
     version: Optional[Union[int, str]] = None,
     base_reports_dir: Union[str, Path] = "reports/benchmarking",
 ) -> tuple[int, Path]:
-    """Resolve destination version directory path."""
+    """Resolve destination version directory path across reports/benchmarking and benchmarks."""
     base_p = Path(base_reports_dir).resolve()
     base_p.mkdir(parents=True, exist_ok=True)
 
@@ -69,6 +75,13 @@ def resolve_report_dir(
     (v_dir / "baseline").mkdir(parents=True, exist_ok=True)
     (v_dir / "pilot").mkdir(parents=True, exist_ok=True)
     (v_dir / "full").mkdir(parents=True, exist_ok=True)
+    (v_dir / "unseen").mkdir(parents=True, exist_ok=True)
+
+    benchmarks_v = Path("benchmarks").resolve() / f"v{v_num}"
+    (benchmarks_v / "baseline").mkdir(parents=True, exist_ok=True)
+    (benchmarks_v / "pilot").mkdir(parents=True, exist_ok=True)
+    (benchmarks_v / "full").mkdir(parents=True, exist_ok=True)
+    (benchmarks_v / "unseen").mkdir(parents=True, exist_ok=True)
     return v_num, v_dir
 
 
@@ -86,6 +99,22 @@ class BenchmarkingReporter:
         self.full_dir = self.version_dir / "full"
         self.unseen_dir = self.version_dir / "unseen"
         self.unseen_dir.mkdir(parents=True, exist_ok=True)
+
+        self.benchmarks_v_dir = Path("benchmarks").resolve() / f"v{self.version}"
+        self.benchmarks_v_dir.mkdir(parents=True, exist_ok=True)
+
+    def _sync_benchmarks(self) -> None:
+        """Mirror all reports into top-level benchmarks/v{version} and benchmarks/leaderboard.md."""
+        try:
+            if self.version_dir.exists() and self.version_dir.resolve() != self.benchmarks_v_dir.resolve():
+                shutil.copytree(str(self.version_dir), str(self.benchmarks_v_dir), dirs_exist_ok=True)
+            top_lead = Path("benchmarks/leaderboard.md").resolve()
+            curr_lead = self.version_dir / "leaderboard.md"
+            if curr_lead.is_file():
+                top_lead.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(str(curr_lead), str(top_lead))
+        except Exception as e:
+            logger.debug(f"Benchmarks sync notice: {e}")
 
     def record_baseline(
         self,
@@ -304,6 +333,7 @@ class BenchmarkingReporter:
         md_text = self._render_leaderboard_md(rows, best_acc, unseen_data)
         leaderboard_md.write_text(md_text, encoding="utf-8")
 
+        self._sync_benchmarks()
         return leaderboard_md, summary_json
 
     def _render_single_stage_md(self, title: str, description: str, metrics: dict[str, Any]) -> str:
