@@ -99,6 +99,11 @@ class Recognizer:
         args.rec_image_shape = image_shape
         args.max_text_length = max_text_length
         args.use_space_char = use_space_char
+        try:
+            from src.utils.pir_compat import self_heal_pir_inference_model
+            self_heal_pir_inference_model(self.model_dir)
+        except Exception:
+            pass
         self._recognizer = TextRecognizer(args)
         # Fail loudly rather than silently scoring visual order as if it were logical.
         postprocess = getattr(self._recognizer, "postprocess_op", None)
