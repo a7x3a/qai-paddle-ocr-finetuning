@@ -171,9 +171,16 @@ class DocumentReader:
             pass
         args = init_args().parse_args([])
         args.det_model_dir = str(self.det_model_p)
-        args.use_gpu = use_gpu
-        args.det_limit_side_len = det_limit_side_len
-        self.detector = predict_det.TextDetector(args)
+        try:
+            self.detector = predict_det.TextDetector(args)
+        except ValueError as e:
+            err = str(e)
+            if "pir::DoubleAttribute" in err or "pir::FloatAttribute" in err:
+                from src.utils.pir_compat import adapt_inference_json_to_runtime
+                adapt_inference_json_to_runtime(self.det_model_p)
+                self.detector = predict_det.TextDetector(args)
+            else:
+                raise
 
         logger.info(f"Loading Kurdish Recognizer from {self.rec_model_p.name}...")
         self.recognizer = Recognizer(self.rec_model_p, use_gpu=use_gpu)

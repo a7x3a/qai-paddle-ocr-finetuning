@@ -104,7 +104,20 @@ class Recognizer:
             self_heal_pir_inference_model(self.model_dir)
         except Exception:
             pass
-        self._recognizer = TextRecognizer(args)
+        try:
+            self._recognizer = TextRecognizer(args)
+        except ValueError as e:
+            err = str(e)
+            if "pir::DoubleAttribute" in err or "pir::FloatAttribute" in err:
+                from src.utils.pir_compat import adapt_inference_json_to_runtime
+                if "DoubleAttribute" in err:
+                    adapt_inference_json_to_runtime(self.model_dir, target_layer_norm_precision="0.a_f64")
+                else:
+                    target = "0.a_f32" if "pd_op3" in err else None
+                    adapt_inference_json_to_runtime(self.model_dir, target_layer_norm_precision=target)
+                self._recognizer = TextRecognizer(args)
+            else:
+                raise
         # Fail loudly rather than silently scoring visual order as if it were logical.
         postprocess = getattr(self._recognizer, "postprocess_op", None)
         self.reverse_applied = bool(getattr(postprocess, "reverse", False))

@@ -129,29 +129,13 @@ class ModelExporter:
             tail = "\n".join(recent_lines[-20:])
             raise RuntimeError(f"Export failed with exit code {process.returncode}:\n{tail}")
 
-        # Post-export sanitization: Paddle PIR runtime requires float32 attributes (0.a_f32)
-        # for batch_norm/layer_norm epsilon. If export serialized them as 0.a_f64, sanitize them.
-        json_file = out_p / "inference.json"
-        if json_file.is_file():
-            try:
-                import json
-                with open(json_file, "r", encoding="utf-8") as f:
-                    jdata = json.load(f)
-                modified = False
-                for op in jdata.get("program", {}).get("regions", [{}])[0].get("blocks", [{}])[0].get("ops", []):
-                    A = op.get("A", [])
-                    if isinstance(A, list):
-                        for item in A:
-                            if isinstance(item, dict) and item.get("N") == "epsilon":
-                                if item.get("AT", {}).get("#") != "0.a_f32":
-                                    item["AT"]["#"] = "0.a_f32"
-                                    modified = True
-                if modified:
-                    with open(json_file, "w", encoding="utf-8") as f:
-                        json.dump(jdata, f)
-                    logger.info("Sanitized PIR epsilon float attributes in inference.json for runtime compatibility.")
-            except Exception as e:
-                logger.warning(f"Could not sanitize inference.json PIR attributes: {e}")
+        # Post-export sanitization: Paddle PIR runtime attribute compatibility
+        # (batch_norm always 0.a_f32, layer_norm 0.a_f64 on Paddle 3.4+ / 0.a_f32 on Paddle 3.3)
+        try:
+            from src.utils.pir_compat import adapt_inference_json_to_runtime
+            adapt_inference_json_to_runtime(out_p)
+        except Exception as e:
+            logger.warning(f"Could not adapt inference.json PIR attributes: {e}")
 
         # Ensure inference.yml specifies PP-OCRv5_mobile_rec for universal upstream compatibility
         yml_file = out_p / "inference.yml"
