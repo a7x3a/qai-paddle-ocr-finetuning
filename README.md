@@ -94,10 +94,12 @@ Start the production training run on the entire Kurdish dataset:
 python main.py train --epochs 40
 ```
 
-> **Note on Training Settings:**
-> - Batch size is **automatically calculated** based on your GPU VRAM (e.g. 384 on 6 GB+, 128 on 4 GB, 16 on CPU).
-> - Mixed Precision (`amp_level: "O2"`) is enabled automatically on GPUs to double speed and cut memory usage in half.
-> - Checkpoints are saved automatically to `output/production_run/checkpoints/` (`best_accuracy.pdparams` and `latest.pdparams`).
+> **Note on Training Settings & Hardware Protection:**
+> - **Guaranteed Reserved Free RAM**: Automatically enforces a strict safety guard preserving **at least 15 GB (or 15% of total system RAM)** completely free for your browser, background apps, and OS tasks.
+> - **DataLoader Worker Throttle**: Capped at 4–6 workers on Windows to eliminate thread lock contention and prevent worker memory bloat while keeping GPU feed queues 100% saturated.
+> - **Auto-Tuned Batch Size**: Calibrated to fit comfortably inside dedicated VRAM (e.g. **256** on 8 GB RTX 5060, **128** on 6 GB RTX 4050, **384** on 12 GB, **512** on 16 GB+).
+> - **Mixed Precision (`amp_level: "O2"`)**: Enabled automatically on GPUs to maximize Tensor Core utilization and cut memory footprint in half.
+> - **Auto-Checkpoints**: Saved to `output/production_run/checkpoints/` (`best_accuracy.pdparams` and `latest.pdparams`).
 
 ---
 
@@ -172,21 +174,36 @@ You can train completely for free on Google Colab:
 
 ## All Commands Cheat Sheet
 
-| Task | Command |
-| :--- | :--- |
-| **Setup everything** | `setup.bat` (Windows) or `bash scripts/setup.sh` (Linux/Colab) |
-| **Verify setup** | `python main.py smoke-test` |
-| **Measure zero-shot baseline** | `python main.py benchmark-base --version 1` |
-| **Mini pilot test (1 min)** | `python main.py pilot-run --num-samples 500 --max-epochs 2 --version 1` |
-| **Full training (40 epochs)** | `python main.py train --epochs 40 --version 1` |
-| **Evaluate all checkpoints** | `python main.py benchmark-all --version 1` |
-| **Evaluate Unseen Data (Multilingual)** | `python main.py benchmark-unseen --count 1000 --version 1` |
-| **Full Automated Pipeline** | `python main.py pipeline` (Smoke → Base → Pilot → Train → Benchmark → Export → Unseen) |
-| **Read Full Page / Book / PDF** | `python main.py read --input my_book.pdf --output-dir ./extracted` |
-| **Launch Interactive Web UI** | `python main.py serve` (or `python app.py`) |
-| **Export for deployment** | `python main.py export` |
-| **Test on sample images** | `python main.py infer --split test --count 5` |
-| **Test on custom image** | `python main.py infer --image path/to/sample.png` |
+| Task | Command | 1-Click Windows Shortcut |
+| :--- | :--- | :--- |
+| **Setup everything** | `setup.bat` (Windows) or `bash scripts/setup.sh` (Linux/Colab) | Double-click `setup.bat` |
+| **Launch Interactive Web Studio** | `python main.py serve` | Double-click `studio.bat` |
+| **Test on sample images** | `python main.py infer --split test --count 5` | Double-click `infer.bat` |
+| **Verify hardware & VRAM** | `python main.py smoke-test` | - |
+| **Measure zero-shot baseline** | `python main.py benchmark-base --version 1` | - |
+| **Mini pilot test (1 min)** | `python main.py pilot-run --num-samples 500 --max-epochs 2 --version 1` | - |
+| **Full training (40 epochs)** | `python main.py train --epochs 40 --version 1` | - |
+| **Evaluate all checkpoints** | `python main.py benchmark-all --version 1` | - |
+| **Evaluate Unseen Data (Multilingual)** | `python main.py benchmark-unseen --count 1000 --version 1` | - |
+| **Full Automated Pipeline** | `python main.py pipeline` (Smoke → Base → Pilot → Train → Benchmark → Export → Unseen) | - |
+| **Read Full Page / Book / PDF** | `python main.py read --input my_book.pdf --output-dir ./extracted` | - |
+| **Export for deployment** | `python main.py export` | - |
+| **Test on custom image** | `python main.py infer --image path/to/sample.png` | - |
+
+---
+
+## Fast Package Management with `uv`
+
+This repository is optimized for [Astral `uv`](https://github.com/astral-sh/uv), the ultra-fast Python package and project manager:
+
+- **Built-in to `.venv`**: When you run `setup.bat`, `uv` is installed directly into your virtual environment (`.venv\Scripts\uv.exe`).
+- **Global Installation (Optional)**: To have `uv` accessible globally in any PowerShell terminal, run:
+  ```powershell
+  powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+  ```
+- **How to Run Commands**:
+  - **With `.venv` active**: `python main.py <command>` or `uv run python main.py <command>`
+  - **Without activating `.venv`**: Double-click `studio.bat` or `infer.bat` (they auto-locate `.venv\Scripts\python.exe`).
 
 ---
 
@@ -218,11 +235,13 @@ python main.py read --input path/to/document_page.jpg --output-dir ./extracted_p
 Launch the zero-dependency browser UI for drag-and-drop testing, clipboard paste, visual bounding box inspection, and real-time latency readouts:
 
 ```bash
+# Option A: One-click launcher on Windows
+.\studio.bat
+
+# Option B: CLI command
 python main.py serve
-# Or:
-python app.py
 ```
-Open [http://127.0.0.1:8501](http://127.0.0.1:8501) in your browser.
+The studio will automatically open [http://127.0.0.1:8501](http://127.0.0.1:8501) in your browser.
 
 ---
 
