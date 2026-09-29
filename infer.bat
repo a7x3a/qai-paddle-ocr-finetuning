@@ -8,9 +8,8 @@ if exist ".venv\Scripts\python.exe" (
     python main.py infer %*
 )
 
-if %ERRORLEVEL% NEQ 0 (
-    echo.
-    echo [ERROR] Inference exited with code %ERRORLEVEL%.
+if errorlevel 1 (
+    echo [ERROR] Inference exited with an error.
     pause
 )
 endlocal

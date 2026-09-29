@@ -281,6 +281,7 @@ def handle_infer(args: argparse.Namespace) -> None:
     recognizer = Recognizer(model_dir, batch_size=args.batch_size, use_gpu=not args.no_gpu)
     samples: list[tuple[Path, str]] = []
 
+    split_name = args.split or ("test" if not args.image else None)
     if args.image:
         target = Path(args.image).resolve()
         if target.is_file():
@@ -292,22 +293,22 @@ def handle_infer(args: argparse.Namespace) -> None:
         else:
             logger.error(f"Target path does not exist: {target}")
             sys.exit(1)
-    elif args.split:
-        label_file = Path(f"data/kurdish_rec/{args.split}_rec.txt").resolve()
+    elif split_name:
+        label_file = Path(f"data/kurdish_rec/{split_name}_rec.txt").resolve()
+        if not label_file.is_file():
+            label_file = Path("data/kurdish_rec/val_rec.txt").resolve()
         rec_root = label_file.parent
         if not label_file.is_file():
-            logger.error(f"Split label file not found: {label_file}")
+            logger.error(f"Split label file not found in data/kurdish_rec/")
             sys.exit(1)
+        count_limit = args.count if args.count is not None else 5
         with open(label_file, "r", encoding="utf-8") as f:
             for idx, line in enumerate(f):
-                if idx >= args.count:
+                if idx >= count_limit:
                     break
                 parts = line.strip().split("\t")
                 if len(parts) >= 2:
                     samples.append((rec_root / parts[0], parts[1]))
-    else:
-        logger.error("Please provide either --image <path> or --split <val|test>")
-        sys.exit(1)
 
     if not samples:
         logger.warning("No images available for inference.")

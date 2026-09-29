@@ -180,21 +180,40 @@ You can train completely for free on Google Colab:
 
 ## All Commands Cheat Sheet
 
-| Task | Command | 1-Click Windows Shortcut |
+| Task | CLI Command | 1-Click Windows Shortcut |
 | :--- | :--- | :--- |
-| **Setup everything** | `setup.bat` (Windows) or `bash scripts/setup.sh` (Linux/Colab) | Double-click `setup.bat` |
-| **Launch Interactive Web Studio** | `python main.py serve` | Double-click `studio.bat` |
-| **Test on sample images** | `python main.py infer --split test --count 5` | Double-click `infer.bat` |
-| **Verify hardware & VRAM** | `python main.py smoke-test` | - |
-| **Measure zero-shot baseline** | `python main.py benchmark-base --version 1` | - |
-| **Mini pilot test (1 min)** | `python main.py pilot-run --num-samples 500 --max-epochs 2 --version 1` | - |
-| **Full training (40 epochs)** | `python main.py train --epochs 40 --version 1` | - |
-| **Evaluate all checkpoints** | `python main.py benchmark-all --version 1` | - |
-| **Evaluate Unseen Data (Multilingual)** | `python main.py benchmark-unseen --count 1000 --version 1` | - |
-| **Full Automated Pipeline** | `python main.py pipeline` (Smoke → Base → Pilot → Train → Benchmark → Export → Unseen) | - |
-| **Read Full Page / Book / PDF** | `python main.py read --input my_book.pdf --output-dir ./extracted` | - |
-| **Export for deployment** | `python main.py export` | - |
-| **Test on custom image** | `python main.py infer --image path/to/sample.png` | - |
+| **Setup Everything** | `setup.bat` (Win) or `bash scripts/setup.sh` (Linux) | Double-click `setup.bat` |
+| **Verify Hardware & VRAM** | `python main.py smoke-test` | Double-click `smoke.bat` |
+| **Baseline Zero-Shot Benchmark** | `python main.py benchmark-base --max-samples 100` | Double-click `benchmark.bat` |
+| **Mini Pilot Test (1 min)** | `python main.py pilot-run --num-samples 500` | Double-click `pilot.bat` |
+| **Full Production Fine-Tuning** | `python main.py train --epochs 40` | Double-click `train.bat` |
+| **Export Trained Model** | `python main.py export` | Double-click `export.bat` |
+| **Test OCR on Images** | `python main.py infer` (or `--split test --count 10`) | Double-click `infer.bat` |
+| **Read Full Page / Book / PDF** | `python main.py read -i my_book.pdf -o ./extracted` | `read.bat -i my_book.pdf` |
+| **End-to-End Automated Pipeline** | `python main.py pipeline --epochs 40` | Double-click `pipeline.bat` |
+| **Interactive Web Studio** *(Visual/Parsing)* | `python main.py serve` | Double-click `studio.bat` |
+
+### CLI Customization Options
+
+All scripts accept CLI arguments directly. For example:
+
+```powershell
+# Custom Training:
+.\train.bat --epochs 50 --batch-size 256 --lr 0.0005
+
+# Custom Pilot:
+.\pilot.bat --num-samples 1000 --max-epochs 3
+
+# Custom Inference:
+.\infer.bat --split test --count 20
+.\infer.bat --image path/to/my_image.png
+
+# Read Multi-page PDF or Scanned Book:
+.\read.bat -i book.pdf -o ./book_output --dpi 300
+
+# Full Automated MLOps Pipeline:
+.\pipeline.bat --epochs 40 --batch-size 256
+```
 
 ---
 
