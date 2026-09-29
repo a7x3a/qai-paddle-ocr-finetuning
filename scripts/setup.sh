@@ -111,6 +111,11 @@ else
     echo "[OK] PaddleOCR pinned to ${PADDLE_COMMIT}"
 fi
 
+# 4.1 Apply Kurdish pipeline patches to PaddleOCR
+echo "[*] Applying Kurdish pipeline patches to PaddleOCR..."
+${PYTHON} scripts/patch_paddleocr.py
+echo "[OK] PaddleOCR patches applied"
+
 # 5. Install unified dependencies
 echo "[*] Installing project dependencies (requirements.txt)..."
 if command -v uv >/dev/null 2>&1; then

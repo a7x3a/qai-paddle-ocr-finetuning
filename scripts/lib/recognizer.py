@@ -48,6 +48,11 @@ def read_model_dictionary(model_dir: Path) -> tuple[list[str], bool]:
 def _ensure_paddleocr_on_path() -> None:
     if str(PADDLE_ROOT) not in sys.path:
         sys.path.insert(0, str(PADDLE_ROOT))
+    try:
+        from scripts.patch_paddleocr import ensure_paddleocr_patched
+        ensure_paddleocr_patched()
+    except Exception:
+        pass
 
 
 class Recognizer:
