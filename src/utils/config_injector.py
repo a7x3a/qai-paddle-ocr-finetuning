@@ -69,10 +69,13 @@ class PaddleConfigInjector:
         save_model_dir: Union[str, Path],
         pretrained_model_path: Optional[Union[str, Path]] = None,
         batch_size: Optional[int] = None,
+        eval_batch_size: Optional[int] = None,
         num_workers: Optional[int] = None,
         epoch_num: Optional[int] = None,
         learning_rate: Optional[float] = None,
-        max_text_length: int = 40,
+        image_shape: Optional[Union[str, list[int]]] = None,
+        max_text_length: Optional[int] = 40,
+        pin_memory: bool = True,
         use_gpu: Optional[bool] = None,
     ) -> dict[str, Any]:
         """Inject runtime paths and hardware-adaptive parameters into the configuration.

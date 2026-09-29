@@ -131,41 +131,35 @@ def get_hardware_profile() -> HardwareProfile:
         elif gpu_memory_mb <= 6144:
             recommended_train_batch = 128
         elif gpu_memory_mb <= 8192:
-            recommended_train_batch = 256
-        elif gpu_memory_mb <= 12288:
             recommended_train_batch = 384
-        elif gpu_memory_mb <= 16384:
+        elif gpu_memory_mb <= 12288:
             recommended_train_batch = 512
         else:
             recommended_train_batch = 512
-        recommended_eval_batch = min(96, recommended_train_batch)
+        recommended_eval_batch = min(256, recommended_train_batch)
         recommended_amp = "O2"
 
-    # Dataloader workers and Host RAM preservation:
+    # Dataloader workers scaling for text recognition:
+    # Text line samples are lightweight (~100-200 KB per sample in memory).
+    # Each DataLoader worker consumes ~150-250 MB RAM.
     if ram_gb >= 48.0:
-        reserved_free_ram_gb = max(8.0, round(ram_gb * 0.10, 1))
+        reserved_free_ram_gb = 4.0
+        target_workers = min(16, max(4, cpu_cores // 2))
     elif ram_gb >= 32.0:
-        reserved_free_ram_gb = max(10.0, round(ram_gb * 0.15, 1))
+        reserved_free_ram_gb = 4.0
+        target_workers = min(12, max(4, cpu_cores // 2))
     elif ram_gb >= 16.0:
-        reserved_free_ram_gb = max(4.0, round(ram_gb * 0.25, 1))
+        reserved_free_ram_gb = 2.0
+        target_workers = min(8, max(2, cpu_cores // 4))
     else:
-        reserved_free_ram_gb = max(2.0, round(ram_gb * 0.20, 1))
+        reserved_free_ram_gb = 1.5
+        target_workers = min(4, max(1, cpu_cores // 4))
 
-    usable_ram_headroom = max(1.0, free_ram_gb - reserved_free_ram_gb)
-    ram_worker_cap = max(1, int(usable_ram_headroom // 1.2))
-    # High-performance worker scaling for high-RAM workstations (e.g. 64GB RAM, 32 cores)
-    if os.name == "nt":
-        if ram_gb >= 48.0 and cpu_cores >= 16:
-            max_workers_platform = min(16, max(4, cpu_cores // 2))
-        elif ram_gb >= 32.0 and cpu_cores >= 8:
-            max_workers_platform = min(8, max(4, cpu_cores // 2))
-        else:
-            max_workers_platform = 4
-    else:
-        max_workers_platform = min(16, max(2, cpu_cores // 2))
+    # Allow headroom check but do not artificially choke high-RAM workstations:
+    available_ram_for_workers = max(2.0, (free_ram_gb - reserved_free_ram_gb) if free_ram_gb > 0 else 4.0)
+    ram_worker_cap = max(1, int(available_ram_for_workers // 0.25))
 
-    cpu_cap = min(max_workers_platform, max(1, int(cpu_cores // 2)))
-    recommended_workers = max(1, min(cpu_cap, ram_worker_cap))
+    recommended_workers = max(1, min(target_workers, ram_worker_cap))
 
     return HardwareProfile(
         has_gpu=has_gpu,

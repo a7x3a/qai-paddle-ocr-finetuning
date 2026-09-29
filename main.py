@@ -426,15 +426,21 @@ def handle_pilot_run(args: argparse.Namespace) -> None:
 
     if getattr(args, "version", None) is not None:
         reporter = BenchmarkingReporter(version=args.version)
-        pilot_json = Path(args.output_dir) / "pilot_benchmark_report.json"
+        actual_pilot_dir = Path(args.output_dir) / "pilot_run" if (Path(args.output_dir) / "pilot_run").is_dir() else Path(args.output_dir)
+        pilot_json = actual_pilot_dir / "pilot_benchmark_report.json"
+        p_metrics = None
         if pilot_json.is_file():
             import json
             with open(pilot_json, "r", encoding="utf-8") as f:
                 p_metrics = json.load(f)
+        elif isinstance(result, dict):
+            p_metrics = result
+
+        if p_metrics:
             reporter.record_pilot(
                 p_metrics,
-                config_path=Path(args.output_dir) / "pilot_runtime_config.yml",
-                train_label_path=Path(args.output_dir) / "pilot_train_label.txt",
+                config_path=actual_pilot_dir / "pilot_runtime_config.yml",
+                train_label_path=actual_pilot_dir / "pilot_train_label.txt",
             )
 
 
@@ -560,8 +566,19 @@ def handle_pipeline(args: argparse.Namespace) -> None:
     outputs_v_dir = Path(f"./outputs/v{version_num}").resolve()
     export_v_dir = Path(f"./export/v{version_num}").resolve()
 
+    from src.utils.hardware import get_hardware_profile
+    profile = get_hardware_profile()
+    eff_bs = args.batch_size if args.batch_size is not None else profile.recommended_train_batch
+    eff_workers = getattr(args, "workers", None) if getattr(args, "workers", None) is not None else profile.recommended_workers
+    eval_bs = getattr(args, "eval_batch_size", None) or min(eff_bs, profile.recommended_eval_batch)
+    img_shape = getattr(args, "image_shape", "3,48,320")
+    max_len = getattr(args, "max_text_length", 32)
+    pin_mem = not getattr(args, "no_pin_memory", False)
+
     logger.info("=" * 75)
     logger.info(f"🚀 INITIATING AUTOMATED KURDISH PADDLEOCR PIPELINE (VERSION: v{version_num})")
+    logger.info(f"🖥️ Hardware Profile    : {profile.gpu_name} ({profile.gpu_memory_mb} MB VRAM, {profile.cpu_cores} Cores, {profile.ram_gb:.1f} GB RAM)")
+    logger.info(f"⚙️ Resource Allocation : Train Batch = {eff_bs}, Eval Batch = {eval_bs}, Workers = {eff_workers}")
     logger.info(f"📊 Benchmarks Directory : {benchmarks_v_dir}")
     logger.info(f"📁 Outputs Directory    : {outputs_v_dir}")
     logger.info(f"📦 Export Directory     : {export_v_dir}")
@@ -589,7 +606,7 @@ def handle_pipeline(args: argparse.Namespace) -> None:
     base_res = engine.run_benchmark(
         model_path=args.pretrained_model,
         val_label_path=args.val_label,
-        batch_size=args.batch_size or 32,
+        batch_size=eval_bs,
         max_samples=args.eval_samples,
     )
     base_metrics = {
@@ -620,10 +637,10 @@ def handle_pipeline(args: argparse.Namespace) -> None:
         output_dir=pilot_dir,
         num_samples=args.pilot_samples,
         max_epochs=args.pilot_epochs,
-        batch_size=args.batch_size or 32,
-        num_workers=getattr(args, "workers", None),
-        image_shape=getattr(args, "image_shape", None),
-        max_text_length=getattr(args, "max_text_length", 32),
+        batch_size=eff_bs,
+        num_workers=eff_workers,
+        image_shape=img_shape,
+        max_text_length=max_len,
         max_eval_samples=args.eval_samples,
     )
     try:
@@ -631,31 +648,31 @@ def handle_pipeline(args: argparse.Namespace) -> None:
     except Exception:
         pass
 
-    pilot_report_p = pilot_dir / "pilot_benchmark_report.json"
+    actual_pilot_dir = pilot_dir / "pilot_run" if (pilot_dir / "pilot_run").is_dir() else pilot_dir
+    pilot_report_p = actual_pilot_dir / "pilot_benchmark_report.json"
+    pilot_data = None
     if pilot_report_p.is_file():
         import json
         with open(pilot_report_p, "r", encoding="utf-8") as f:
             pilot_data = json.load(f)
+    elif isinstance(pilot_res, dict):
+        pilot_data = pilot_res
+
+    if pilot_data:
         reporter.record_pilot(
             pilot_data,
-            config_path=pilot_dir / "pilot_runtime_config.yml",
-            train_label_path=pilot_dir / "pilot_train_label.txt",
+            config_path=actual_pilot_dir / "pilot_runtime_config.yml",
+            train_label_path=actual_pilot_dir / "pilot_train_label.txt",
         )
-    logger.info(f" Stage 3 (Pilot Run) completed: Exact Match = {pilot_res.accuracy * 100:.2f}%, CER = {pilot_res.macro_cer * 100:.2f}%")
+
+    pilot_acc = pilot_res.get("accuracy", 0.0) if isinstance(pilot_res, dict) else getattr(pilot_res, "accuracy", 0.0)
+    pilot_cer = pilot_res.get("macro_cer", 0.0) if isinstance(pilot_res, dict) else getattr(pilot_res, "macro_cer", getattr(pilot_res, "micro_cer", 0.0))
+    logger.info(f" Stage 3 (Pilot Run) completed: Exact Match = {pilot_acc * 100:.2f}%, CER = {pilot_cer * 100:.2f}%")
 
     # Stage 4: Full Fine-Tuning (Continual learning without forgetting)
     logger.info(f"\n[STAGE 4/7] Initiating Full Production Training ({args.epochs} epochs)...")
     full_output_dir = output_v_dir / "production_run"
     full_output_dir.mkdir(parents=True, exist_ok=True)
-
-    from src.utils.hardware import get_hardware_profile
-    profile = get_hardware_profile()
-    eff_bs = args.batch_size or profile.recommended_train_batch
-    eff_workers = getattr(args, "workers", None) or profile.recommended_workers
-    eval_bs = getattr(args, "eval_batch_size", None)
-    img_shape = getattr(args, "image_shape", None)
-    max_len = getattr(args, "max_text_length", None)
-    pin_mem = not getattr(args, "no_pin_memory", False)
 
     injector = PaddleConfigInjector(args.config)
     injector.inject_runtime_paths(
@@ -723,10 +740,10 @@ def handle_pipeline(args: argparse.Namespace) -> None:
     if test_label_p.is_file():
         unseen_eval = UnseenEvaluator(
             model_dir=export_dir,
-            batch_size=eff_bs,
+            batch_size=eval_bs,
             use_gpu=not args.no_gpu,
-            image_shape=getattr(args, "image_shape", "3,48,320"),
-            max_text_length=getattr(args, "max_text_length", 32),
+            image_shape=img_shape,
+            max_text_length=max_len,
         )
         unseen_rep = unseen_eval.evaluate(
             test_label_path=test_label_p,

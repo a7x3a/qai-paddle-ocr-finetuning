@@ -73,6 +73,21 @@ class ModelExporter:
             stem = ckpt_p.stem
             if ckpt_p.name.endswith(".pdparams"):
                 ckpt_p = ckpt_p.parent / stem
+            elif not Path(str(ckpt_p) + ".pdparams").is_file():
+                parent_dir = ckpt_p.parent
+                if parent_dir.is_dir():
+                    if (parent_dir / "best_accuracy.pdparams").is_file():
+                        ckpt_p = parent_dir / "best_accuracy"
+                    elif (parent_dir / "latest.pdparams").is_file():
+                        ckpt_p = parent_dir / "latest"
+                    else:
+                        candidates = list(parent_dir.glob("*.pdparams"))
+                        if candidates:
+                            ckpt_p = parent_dir / candidates[0].stem
+                        else:
+                            raise FileNotFoundError(f"No .pdparams checkpoint found matching: {ckpt_p}")
+                else:
+                    raise FileNotFoundError(f"Checkpoint path not found: {ckpt_p}")
 
         logger.info(f"Exporting model from checkpoint: {ckpt_p}")
         logger.info(f"Using configuration: {cfg_p}")
