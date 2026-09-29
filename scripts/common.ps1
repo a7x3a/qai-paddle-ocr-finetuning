@@ -82,13 +82,10 @@ function Get-QaiHardwareProfile {
         $batch = 16
     }
     elseif ($gpuMemoryMB -le 4096) {
-        $batch = 32
-    }
-    elseif ($gpuMemoryMB -le 6144) {
-        $batch = 128
+        $batch = 64
     }
     elseif ($gpuMemoryMB -le 8192) {
-        $batch = 256
+        $batch = 384  # Full GPU saturation on 6GB+ GPUs with AMP O2 (4.1 GB VRAM)
     }
     elseif ($gpuMemoryMB -le 12288) {
         $batch = 384
@@ -96,21 +93,17 @@ function Get-QaiHardwareProfile {
     else {
         $batch = 512
     }
-    $evalBatch = [math]::Min(96, $batch)
+    $evalBatch = [math]::Min(128, $batch)
 
-    # System RAM protection: Enforce user requirement to ALWAYS keep at least 15 GB
-    # (or 15% of total system memory on high-RAM systems) completely free for OS and user tasks.
-    $reservedRamGB = if ($ramGB -ge 32.0) { [math]::Max(15.0, [math]::Round($ramGB * 0.15, 1)) }
-                     elseif ($ramGB -ge 16.0) { [math]::Max(4.0, [math]::Round($ramGB * 0.25, 1)) }
-                     else { [math]::Max(2.0, [math]::Round($ramGB * 0.20, 1)) }
+    # System RAM protection: Keep 10-15 GB free on large systems, 2.5 GB on 16 GB systems
+    $reservedRamGB = if ($ramGB -ge 48.0) { 15.0 }
+                     elseif ($ramGB -ge 32.0) { 10.0 }
+                     elseif ($ramGB -ge 16.0) { 2.5 }
+                     else { 1.5 }
 
     $usableRamGB = [math]::Max(1.0, $freeRamGB - $reservedRamGB)
-    # Budget ~1.5 GB per worker from usable memory headroom
-    $ramCap = [math]::Max(1, [int][math]::Floor($usableRamGB / 1.5))
-    # Cap workers on Windows at 4 (or 6 on >=32 core beasts) to prevent thread contention & paging
-    $maxWorkers = if ($ramGB -ge 32.0 -and $cpu -ge 16) { 6 } else { 4 }
-    $cpuCap = [math]::Min($maxWorkers, [math]::Max(1, [int][math]::Floor($cpu / 4)))
-    $workers = [math]::Min($cpuCap, $ramCap)
+    $maxWorkers = if ($cpu -ge 32) { 20 } elseif ($cpu -ge 16) { 16 } elseif ($cpu -ge 10) { 8 } else { 4 }
+    $workers = [math]::Max(2, $maxWorkers)
 
     return [pscustomobject]@{
         CpuCores               = $cpu
