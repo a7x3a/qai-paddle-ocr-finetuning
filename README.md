@@ -38,10 +38,19 @@ Clone the repo and run the setup script for your OS:
   bash scripts/setup.sh
   ```
 
-- **Or Using Python Directly**:
+- **Instant Out-Of-The-Box Testing**:
+  Because this repository pre-bundles the production-exported model (`export/kurdish_final`) and text detector (`assets/base_det_inference`), you can immediately read books or test samples right after setup:
   ```bash
-  python main.py setup
+  # Option A: One-click interactive studio (or run .\studio.bat on Windows):
+  python main.py serve
+
+  # Option B: Test on unseen test images (or run .\infer.bat):
+  python main.py infer --split test --count 5
+
+  # Option C: Read a full PDF document or scanned book:
+  python main.py read --input path/to/document.pdf --output-dir ./extracted
   ```
+  *(Note: Run with `.venv\Scripts\activate` first, or use `uv run python main.py ...`)*
 
 > **What this does automatically:**
 > 1. Creates a Python virtual environment (`.venv`).

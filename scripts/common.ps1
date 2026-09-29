@@ -81,25 +81,42 @@ function Get-QaiHardwareProfile {
     if ($gpuMemoryMB -le 0) {
         $batch = 16
     }
-    else {
-        $batch = [int][math]::Floor(($gpuMemoryMB * 0.75) / 11.6)
+    elseif ($gpuMemoryMB -le 4096) {
+        $batch = 32
     }
-    $batch = [math]::Max(16, ([math]::Floor($batch / 16) * 16))
+    elseif ($gpuMemoryMB -le 6144) {
+        $batch = 128
+    }
+    elseif ($gpuMemoryMB -le 8192) {
+        $batch = 256
+    }
+    elseif ($gpuMemoryMB -le 12288) {
+        $batch = 384
+    }
+    else {
+        $batch = 512
+    }
     $evalBatch = [math]::Min(96, $batch)
 
-    # More loader workers than the CPU count stops helping once the disk read saturates
-    # (measured: 8 workers beat 12, which only added contention, and at batch 384
-    # avg_reader_cost fell to 0.005 s, i.e. the queue was never even close to empty).
-    # Memory is the binding constraint instead: each worker keeps a prefetch queue of
-    # full batches, so budget ~1.5 GB per worker against free RAM.
-    $cpuCap = [math]::Min(8, [math]::Max(2, [int][math]::Floor($cpu / 1.5)))
-    $ramCap = [math]::Max(2, [int][math]::Floor($freeRamGB / 1.5))
+    # System RAM protection: Enforce user requirement to ALWAYS keep at least 15 GB
+    # (or 15% of total system memory on high-RAM systems) completely free for OS and user tasks.
+    $reservedRamGB = if ($ramGB -ge 32.0) { [math]::Max(15.0, [math]::Round($ramGB * 0.15, 1)) }
+                     elseif ($ramGB -ge 16.0) { [math]::Max(4.0, [math]::Round($ramGB * 0.25, 1)) }
+                     else { [math]::Max(2.0, [math]::Round($ramGB * 0.20, 1)) }
+
+    $usableRamGB = [math]::Max(1.0, $freeRamGB - $reservedRamGB)
+    # Budget ~1.5 GB per worker from usable memory headroom
+    $ramCap = [math]::Max(1, [int][math]::Floor($usableRamGB / 1.5))
+    # Cap workers on Windows at 4 (or 6 on >=32 core beasts) to prevent thread contention & paging
+    $maxWorkers = if ($ramGB -ge 32.0 -and $cpu -ge 16) { 6 } else { 4 }
+    $cpuCap = [math]::Min($maxWorkers, [math]::Max(1, [int][math]::Floor($cpu / 4)))
     $workers = [math]::Min($cpuCap, $ramCap)
 
     return [pscustomobject]@{
         CpuCores               = $cpu
         RamGB                  = $ramGB
         FreeRamGB              = $freeRamGB
+        ReservedFreeRamGB      = $reservedRamGB
         GpuName                = $gpuName
         GpuMemoryMB            = $gpuMemoryMB
         RecommendedBatch       = $batch

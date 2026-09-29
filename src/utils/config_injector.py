@@ -36,8 +36,10 @@ def auto_detect_gpu_batch_size(vram_gb: Optional[float] = None) -> int:
             return 128
         elif vram_gb < 12.0:
             return 256
-        else:
+        elif vram_gb < 16.0:
             return 384
+        else:
+            return 512
 
     profile = get_hardware_profile()
     return profile.recommended_train_batch
@@ -144,7 +146,10 @@ class PaddleConfigInjector:
         profile = get_hardware_profile()
         effective_bs = batch_size or profile.recommended_train_batch
         effective_workers = num_workers if num_workers is not None else profile.recommended_workers
-        logger.info(f"Allocated parameters: Batch Size = {effective_bs}, Workers = {effective_workers}")
+        logger.info(
+            f"Allocated parameters: Batch Size = {effective_bs}, Workers = {effective_workers} "
+            f"(Guaranteed Reserved Host RAM: {profile.reserved_free_ram_gb} GB)"
+        )
 
         # Determine dataset root containing 'images'
         train_data_dir = "./"

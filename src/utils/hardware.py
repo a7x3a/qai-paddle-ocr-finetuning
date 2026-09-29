@@ -25,6 +25,7 @@ class HardwareProfile:
     cpu_cores: int
     ram_gb: float
     free_ram_gb: float
+    reserved_free_ram_gb: float
     recommended_train_batch: int
     recommended_eval_batch: int
     recommended_workers: int
@@ -126,26 +127,34 @@ def get_hardware_profile() -> HardwareProfile:
         recommended_amp = "O0"
     else:
         if gpu_memory_mb <= 4096:
-            recommended_train_batch = 16
-        elif gpu_memory_mb <= 6144:
             recommended_train_batch = 32
-        elif gpu_memory_mb <= 8192:
-            recommended_train_batch = 48
-        elif gpu_memory_mb <= 12288:
-            recommended_train_batch = 64
-        elif gpu_memory_mb <= 16384:
-            recommended_train_batch = 96
-        else:
+        elif gpu_memory_mb <= 6144:
             recommended_train_batch = 128
-        recommended_eval_batch = min(48, recommended_train_batch)
+        elif gpu_memory_mb <= 8192:
+            recommended_train_batch = 256
+        elif gpu_memory_mb <= 12288:
+            recommended_train_batch = 384
+        elif gpu_memory_mb <= 16384:
+            recommended_train_batch = 512
+        else:
+            recommended_train_batch = 512
+        recommended_eval_batch = min(96, recommended_train_batch)
         recommended_amp = "O2"
 
-    # Dataloader workers:
-    # Explicitly guarantee at least 10 GB of host RAM is ALWAYS preserved free for user applications.
-    # Budget ~1.2 GB per worker process from the available memory above the 10 GB safety floor.
-    usable_ram_headroom = max(0.0, free_ram_gb - 10.0)
+    # Dataloader workers and Host RAM preservation:
+    # Explicitly enforce user requirement: ALWAYS keep at least 15 GB (or 15% of total RAM on high-RAM systems)
+    # completely free for other user applications, browser, and OS headroom.
+    if ram_gb >= 32.0:
+        reserved_free_ram_gb = max(15.0, round(ram_gb * 0.15, 1))
+    elif ram_gb >= 16.0:
+        reserved_free_ram_gb = max(4.0, round(ram_gb * 0.25, 1))
+    else:
+        reserved_free_ram_gb = max(2.0, round(ram_gb * 0.20, 1))
+
+    usable_ram_headroom = max(1.0, free_ram_gb - reserved_free_ram_gb)
     ram_worker_cap = max(1, int(usable_ram_headroom // 1.5))
-    max_workers_platform = 4 if (os.name == "nt" and free_ram_gb >= 20.0) else (2 if os.name == "nt" else 6)
+    # Cap workers on Windows at 4 (or 6 on >=32 core beasts) to prevent thread contention & paging
+    max_workers_platform = 6 if (os.name == "nt" and ram_gb >= 32.0 and cpu_cores >= 16) else (4 if os.name == "nt" else 8)
     cpu_cap = min(max_workers_platform, max(1, int(cpu_cores // 4)))
     recommended_workers = max(1, min(cpu_cap, ram_worker_cap))
 
@@ -156,6 +165,7 @@ def get_hardware_profile() -> HardwareProfile:
         cpu_cores=cpu_cores,
         ram_gb=ram_gb,
         free_ram_gb=free_ram_gb,
+        reserved_free_ram_gb=reserved_free_ram_gb,
         recommended_train_batch=recommended_train_batch,
         recommended_eval_batch=recommended_eval_batch,
         recommended_workers=recommended_workers,

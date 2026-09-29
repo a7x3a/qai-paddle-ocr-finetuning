@@ -145,8 +145,27 @@ $ErrorActionPreference = 'Continue'
 
 try {
     $uv = Get-Command uv -ErrorAction SilentlyContinue
+    $venvUv = Join-Path $venv 'Scripts\uv.exe'
+    if (-not (Test-Path $venvUv)) {
+        $altUv = Join-Path $venv 'bin\uv'
+        if (Test-Path $altUv) { $venvUv = $altUv }
+    }
+
+    if (-not $uv -and (Test-Path $venvUv)) {
+        $uv = Get-Command $venvUv -ErrorAction SilentlyContinue
+    }
+
+    if (-not $uv) {
+        Write-QaiStep 'ensuring uv package manager in virtual environment...'
+        & $python -m pip install uv --quiet
+        if (Test-Path $venvUv) {
+            $uv = Get-Command $venvUv -ErrorAction SilentlyContinue
+        }
+    }
+
     if ($uv) {
-        Write-QaiOk "uv package manager detected ($(& uv --version)) - utilizing ultra-fast caching"
+        $uvVer = & $uv.Source --version 2>$null
+        Write-QaiOk "uv package manager ready ($uvVer) - utilizing ultra-fast caching"
     } else {
         Write-QaiStep 'upgrading pip and setuptools...'
         & $python -m pip install --upgrade pip setuptools wheel --timeout 120 --retries 5 --quiet
@@ -251,7 +270,7 @@ try {
     # ------------------------------------------------------------ 4. Requirements
     Write-QaiStep 'installing unified dependencies (requirements.txt)...'
     if ($uv) {
-        & uv pip install --python $python -r (Join-Path $projectRoot 'requirements.txt')
+        & $uv.Source pip install --python $python -r (Join-Path $projectRoot 'requirements.txt')
     } else {
         & $python -m pip install -r (Join-Path $projectRoot 'requirements.txt') --quiet
     }
@@ -301,11 +320,12 @@ $hardware = Get-QaiHardwareProfile
 Write-Host ''
 Write-QaiHeader 'Setup Complete & Ready'
 Write-Host "  GPU Compute : $($hardware.GpuName) ($($hardware.GpuMemoryMB) MB)" -ForegroundColor Green
-Write-Host "  CPU / RAM   : $($hardware.CpuCores) cores / $($hardware.RamGB) GB" -ForegroundColor DarkGray
+Write-Host "  CPU / RAM   : $($hardware.CpuCores) cores / $($hardware.RamGB) GB ($($hardware.ReservedFreeRamGB) GB reserved free)" -ForegroundColor DarkGray
 Write-Host "  Batch Size  : $($hardware.RecommendedBatch) (Train) / $($hardware.RecommendedEvalBatch) (Eval)" -ForegroundColor DarkCyan
-Write-Host "  Workers     : $($hardware.RecommendedWorkers)" -ForegroundColor DarkCyan
+Write-Host "  Workers     : $($hardware.RecommendedWorkers) (Memory & thread safety capped)" -ForegroundColor DarkCyan
 Write-Host ''
 Write-Host '  Suggested Workflow Commands:' -ForegroundColor Cyan
+Write-Host '    python main.py serve                                # Launch interactive web studio' -ForegroundColor Yellow
 Write-Host '    python main.py smoke-test                           # Verify GPU, VRAM & gradient pass' -ForegroundColor White
 Write-Host '    python main.py benchmark-base --max-samples 100     # Zero-shot baseline benchmark' -ForegroundColor White
 Write-Host '    python main.py pilot-run --num-samples 500          # Rapid 2-epoch mini convergence test' -ForegroundColor White

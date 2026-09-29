@@ -15,9 +15,9 @@ import tempfile
 import time
 import urllib.parse
 from http import HTTPStatus
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, HTTPServer, ThreadingHTTPServer
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 
 import cv2
 import numpy as np
@@ -739,7 +739,7 @@ def start_server(
     InferenceRequestHandler.test_image_dir = Path(test_image_root).resolve() if test_image_root else None
 
     server_address = (host, port)
-    httpd = HTTPServer(server_address, InferenceRequestHandler)
+    httpd = ThreadingHTTPServer(server_address, InferenceRequestHandler)
     url = f"http://{host}:{port}"
 
     logger.info("=" * 60)
