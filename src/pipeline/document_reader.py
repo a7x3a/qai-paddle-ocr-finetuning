@@ -163,6 +163,12 @@ class DocumentReader:
             )
 
         logger.info(f"Loading Text Detector from {self.det_model_p.name}...")
+        try:
+            from src.utils.pir_compat import self_heal_pir_inference_model
+            self_heal_pir_inference_model(self.det_model_p)
+            self_heal_pir_inference_model(self.rec_model_p)
+        except Exception:
+            pass
         args = init_args().parse_args([])
         args.det_model_dir = str(self.det_model_p)
         args.use_gpu = use_gpu

@@ -41,10 +41,12 @@ if (sys.prefix == sys.base_prefix) and _venv_path.is_dir() and not _is_setup:
 if (PROJECT_ROOT / "PaddleOCR").is_dir() and str(PROJECT_ROOT / "PaddleOCR") not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT / "PaddleOCR"))
 
-# Auto-apply runtime patches to PaddleOCR if needed
+# Auto-apply runtime patches to PaddleOCR and PIR model compatibility if needed
 try:
     from scripts.patch_paddleocr import ensure_paddleocr_patched
     ensure_paddleocr_patched()
+    from src.utils.pir_compat import heal_all_known_models
+    heal_all_known_models(PROJECT_ROOT)
 except Exception:
     pass
 
