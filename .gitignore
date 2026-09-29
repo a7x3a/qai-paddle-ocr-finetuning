@@ -13,7 +13,8 @@ __pycache__/
 
 # --- generated training / export / report artifacts ---
 /output/
-/export/
+/export/*
+!/export/kurdish_final/
 /extracted_documents/
 *.log
 /reports/*

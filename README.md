@@ -20,36 +20,50 @@ flowchart LR
 
 ---
 
-### Step 1: Install Everything (1-Click)
+### Step 1: Install Everything on a Fresh PC (1-Click)
 
 > [!IMPORTANT]
-> **Prerequisites**: Ensure you have 64-bit **Python 3.10, 3.11, or 3.12** installed (PaddlePaddle 3.3.1 does not have wheels for Python 3.13 yet). If you have an NVIDIA GPU, `setup.bat` automatically detects your GPU and installs GPU-accelerated PaddlePaddle.
+> **Zero Prior Configuration Needed**:
+> When setting up on a completely clean/wiped PC, `setup.bat` handles everything automatically:
+> - Installs Microsoft Visual C++ Runtime (if missing via `winget`).
+> - Installs 64-bit Python 3.12 (if missing via `winget`).
+> - Utilizes **`uv`** for lightning-fast package caching and dependency installation.
+> - Automatically detects your GPU architecture:
+>   - **RTX 50-series / Blackwell**: Installs `paddlepaddle-gpu==3.4.0` (cu129).
+>   - **RTX 40/30/20-series / Ada Lovelace**: Installs `paddlepaddle-gpu==3.3.1` (cu126/cu118).
+>   - **No GPU**: Falls back cleanly to CPU-optimized `paddlepaddle==3.3.1`.
+> - Clones and pins the official PaddleOCR repository.
+> - Downloads the official base model weights and extracts the 162,000+ Kurdish dataset from Hugging Face.
 
-Clone the repo and run the setup script for your OS:
+Clone the repo and run the automated setup:
 
 - **On Windows**:
-  Double-click `setup.bat` or run in terminal:
   ```cmd
+  git clone https://github.com/a7x3a/qai-paddle-ocr-finetuning.git
+  cd qai-paddle-ocr-finetuning
   setup.bat
   ```
+  *(Or simply double-click `setup.bat` in File Explorer).*
 
 - **On Linux / WSL / Google Colab**:
   ```bash
+  git clone https://github.com/a7x3a/qai-paddle-ocr-finetuning.git
+  cd qai-paddle-ocr-finetuning
   bash scripts/setup.sh
   ```
 
-- **Or Using Python Directly**:
+- **Instant Out-Of-The-Box Testing**:
+  Because this repository pre-bundles the production-exported model (`export/kurdish_final`) and text detector (`assets/base_det_inference`), you can immediately read books or test samples right after setup:
   ```bash
-  python main.py setup
-  ```
+  # Test on unseen test images:
+  uv run python main.py infer --split test --count 5
 
-> **What this does automatically:**
-> 1. Creates a Python virtual environment (`.venv`).
-> 2. Detects your hardware (NVIDIA GPU with CUDA 12.x/11.x, or CPU) and installs the right PaddlePaddle build.
-> 3. Clones the official PaddleOCR repository.
-> 4. Downloads official `arabic_PP-OCRv5_mobile_rec` base model weights.
-> 5. Downloads and extracts the 162,000+ Kurdish dataset from Hugging Face into `data/kurdish_rec/`.
-> 6. Runs a full environment verification.
+  # Read a PDF document or scanned book:
+  uv run python main.py read --input path/to/document.pdf --output-dir ./extracted
+
+  # Launch the web studio UI:
+  uv run python main.py serve
+  ```
 
 ---
 
