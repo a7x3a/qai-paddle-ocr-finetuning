@@ -456,18 +456,10 @@ def handle_train(args: argparse.Namespace) -> None:
         output_dir = Path(f"./output/v{v_num}/production_run").resolve()
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    batch_size = args.batch_size
-    from src.utils.hardware import get_hardware_profile
-    profile = get_hardware_profile()
-    if batch_size is None:
-        batch_size = profile.recommended_train_batch
-        logger.info(f"Auto-selected hardware-optimized batch size: {batch_size} (Device: {profile.gpu_name})")
-
-    workers = getattr(args, "workers", None)
-    eval_bs = getattr(args, "eval_batch_size", None)
-    img_shape = getattr(args, "image_shape", None)
-    max_len = getattr(args, "max_text_length", None)
-    pin_mem = not getattr(args, "no_pin_memory", False)
+    from src.utils.hardware import configure_training_resources
+    batch_size, eval_bs, workers, pin_mem = configure_training_resources(args, is_pipeline=False)
+    img_shape = getattr(args, "image_shape", "3,48,320")
+    max_len = getattr(args, "max_text_length", 32)
 
     injector = PaddleConfigInjector(args.config)
     injector.inject_runtime_paths(
@@ -566,19 +558,13 @@ def handle_pipeline(args: argparse.Namespace) -> None:
     outputs_v_dir = Path(f"./outputs/v{version_num}").resolve()
     export_v_dir = Path(f"./export/v{version_num}").resolve()
 
-    from src.utils.hardware import get_hardware_profile
-    profile = get_hardware_profile()
-    eff_bs = args.batch_size if args.batch_size is not None else profile.recommended_train_batch
-    eff_workers = getattr(args, "workers", None) if getattr(args, "workers", None) is not None else profile.recommended_workers
-    eval_bs = getattr(args, "eval_batch_size", None) or min(eff_bs, profile.recommended_eval_batch)
+    from src.utils.hardware import configure_training_resources
+    eff_bs, eval_bs, eff_workers, pin_mem = configure_training_resources(args, is_pipeline=True)
     img_shape = getattr(args, "image_shape", "3,48,320")
     max_len = getattr(args, "max_text_length", 32)
-    pin_mem = not getattr(args, "no_pin_memory", False)
 
     logger.info("=" * 75)
     logger.info(f"🚀 INITIATING AUTOMATED KURDISH PADDLEOCR PIPELINE (VERSION: v{version_num})")
-    logger.info(f"🖥️ Hardware Profile    : {profile.gpu_name} ({profile.gpu_memory_mb} MB VRAM, {profile.cpu_cores} Cores, {profile.ram_gb:.1f} GB RAM)")
-    logger.info(f"⚙️ Resource Allocation : Train Batch = {eff_bs}, Eval Batch = {eval_bs}, Workers = {eff_workers}")
     logger.info(f"📊 Benchmarks Directory : {benchmarks_v_dir}")
     logger.info(f"📁 Outputs Directory    : {outputs_v_dir}")
     logger.info(f"📦 Export Directory     : {export_v_dir}")
@@ -955,6 +941,9 @@ def main() -> None:
     p_train.add_argument("--no-pin-memory", action="store_true", help="Disable DataLoader page-locked pinned memory")
     p_train.add_argument("--lr", type=float, default=0.001, help="Initial learning rate")
     p_train.add_argument("--gpus", type=str, default="0", help="GPU indices (e.g. '0' or '0,1')")
+    p_train.add_argument("--reserve-ram-gb", type=float, default=15.0, help="Amount of host RAM (in GB) strictly preserved free for OS & desktop (default: 15.0)")
+    p_train.add_argument("--interactive", action="store_true", help="Force interactive resource selection menu in CLI")
+    p_train.add_argument("--no-interactive", action="store_true", help="Disable interactive resource prompt (auto-select recommended)")
     p_train.add_argument("--version", type=str, default=None, help="Report version directory tag (e.g. '1' or 'v1')")
     p_train.set_defaults(func=handle_train)
 
@@ -1005,6 +994,9 @@ def main() -> None:
     p_pipe.add_argument("--image-shape", type=str, default="3,48,320", help="Model prediction & training input image resolution 'C,H,W' (default: '3,48,320')")
     p_pipe.add_argument("--max-text-length", type=int, default=32, help="Maximum text sequence length (default: 32)")
     p_pipe.add_argument("--no-pin-memory", action="store_true", help="Disable DataLoader page-locked pinned memory")
+    p_pipe.add_argument("--reserve-ram-gb", type=float, default=15.0, help="Amount of host RAM (in GB) strictly preserved free for OS & desktop (default: 15.0)")
+    p_pipe.add_argument("--interactive", action="store_true", help="Force interactive resource selection menu in CLI")
+    p_pipe.add_argument("--no-interactive", action="store_true", help="Disable interactive resource prompt (auto-select recommended)")
     p_pipe.add_argument("--lr", type=float, default=0.001, help="Initial learning rate")
     p_pipe.add_argument("--pilot-samples", type=int, default=200, help="Pilot subset sample count (default: 200)")
     p_pipe.add_argument("--pilot-epochs", type=int, default=2, help="Pilot epochs (default: 2)")
