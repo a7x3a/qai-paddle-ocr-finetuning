@@ -41,6 +41,13 @@ if (sys.prefix == sys.base_prefix) and _venv_path.is_dir() and not _is_setup:
 if (PROJECT_ROOT / "PaddleOCR").is_dir() and str(PROJECT_ROOT / "PaddleOCR") not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT / "PaddleOCR"))
 
+# Auto-apply runtime patches to PaddleOCR if needed
+try:
+    from scripts.patch_paddleocr import ensure_paddleocr_patched
+    ensure_paddleocr_patched()
+except Exception:
+    pass
+
 from src.benchmark.engine import BenchmarkEngine
 from src.data.processor import DatasetProcessor
 from src.pipeline.benchmarking_reporter import BenchmarkingReporter, resolve_report_dir

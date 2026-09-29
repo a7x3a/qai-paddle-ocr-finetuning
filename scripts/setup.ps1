@@ -267,6 +267,11 @@ try {
         Write-QaiOk "PaddleOCR cloned and pinned to $commit"
     }
 
+    # Apply required runtime patches to PaddleOCR
+    Write-QaiStep 'applying Kurdish pipeline patches to PaddleOCR...'
+    & $python (Join-Path $PSScriptRoot 'patch_paddleocr.py')
+    Write-QaiOk 'PaddleOCR patches verified'
+
     # ------------------------------------------------------------ 4. Requirements
     Write-QaiStep 'installing unified dependencies (requirements.txt)...'
     if ($uv) {

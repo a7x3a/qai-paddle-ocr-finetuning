@@ -1,5 +1,5 @@
 Global:
-  model_name: arabic_PP-OCRv5_mobile_rec
+  model_name: PP-OCRv5_mobile_rec
 Hpi:
   backend_configs:
     paddle_infer:

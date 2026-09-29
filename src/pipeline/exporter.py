@@ -153,6 +153,21 @@ class ModelExporter:
             except Exception as e:
                 logger.warning(f"Could not sanitize inference.json PIR attributes: {e}")
 
+        # Ensure inference.yml specifies PP-OCRv5_mobile_rec for universal upstream compatibility
+        yml_file = out_p / "inference.yml"
+        if yml_file.is_file():
+            try:
+                import yaml
+                with open(yml_file, "r", encoding="utf-8") as f:
+                    ydata = yaml.safe_load(f)
+                if ydata and "Global" in ydata and ydata["Global"].get("model_name") == "arabic_PP-OCRv5_mobile_rec":
+                    ydata["Global"]["model_name"] = "PP-OCRv5_mobile_rec"
+                    with open(yml_file, "w", encoding="utf-8") as f:
+                        yaml.dump(ydata, f, allow_unicode=True, default_flow_style=False)
+                    logger.info("Sanitized model_name in inference.yml to PP-OCRv5_mobile_rec for universal PaddleOCR compatibility.")
+            except Exception as e:
+                logger.warning(f"Could not sanitize inference.yml model_name: {e}")
+
         # Bundle character dictionary so the exported model is self-contained
         if dict_p.is_file():
             shutil.copy2(str(dict_p), str(out_p / "arabic_kurdish_dict.txt"))
