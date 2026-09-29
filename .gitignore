@@ -10,6 +10,8 @@ __pycache__/
 
 # --- generated datasets (recreated by scripts/prepare_dataset.py) ---
 /data/
+!data/kurdish_rec/sample_page.jpg
+!data/kurdish_rec/sample_document.pdf
 
 # --- generated training / export / report artifacts ---
 /output/

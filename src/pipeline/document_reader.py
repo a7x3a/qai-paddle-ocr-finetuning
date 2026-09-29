@@ -56,19 +56,53 @@ class TextLine:
 
 
 @dataclass
+class LayoutBlock:
+    """Represents a high-level semantic layout region (Header, Paragraph, Table, Column, etc.)."""
+    block_id: int
+    block_type: str  # "title", "header", "paragraph", "table", "caption"
+    column_index: int
+    bbox: list[float]  # [x_min, y_min, x_max, y_max]
+    lines: list[TextLine]
+    text: str
+    confidence: float
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "block_id": self.block_id,
+            "block_type": self.block_type,
+            "column_index": self.column_index,
+            "bbox": [round(float(c), 1) for c in self.bbox],
+            "text": self.text,
+            "confidence": round(float(self.confidence), 4),
+            "line_count": len(self.lines),
+            "lines": [asdict(l) for l in self.lines],
+        }
+
+
+@dataclass
 class DocumentResult:
-    """Complete single-page document OCR result."""
+    """Complete single-page document OCR result with semantic layout structure."""
     full_text: str
     lines: list[TextLine]
+    markdown_text: str = ""
+    blocks: list[LayoutBlock] = field(default_factory=list)
+    column_count: int = 1
     annotated_image: Optional[np.ndarray] = None
+    annotated_layout_image: Optional[np.ndarray] = None
     timing_ms: dict[str, float] = field(default_factory=dict)
     page_number: int = 1
+    total_pages: int = 1
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "page_number": self.page_number,
+            "total_pages": self.total_pages,
+            "column_count": self.column_count,
             "full_text": self.full_text,
+            "markdown_text": self.markdown_text or self.full_text,
             "line_count": len(self.lines),
+            "block_count": len(self.blocks),
+            "blocks": [b.to_dict() for b in self.blocks],
             "lines": [asdict(l) for l in self.lines],
             "timing_ms": self.timing_ms,
         }
@@ -286,6 +320,280 @@ class DocumentReader:
 
         return final_ordered
 
+    @classmethod
+    def _analyze_document_layout(
+        cls,
+        lines: list[TextLine],
+        img_w: int,
+        img_h: int,
+    ) -> tuple[list[LayoutBlock], int, str]:
+        """Analyze detected lines to build high-level semantic layout blocks (Title, Header, Paragraph, Table, Footer).
+        Returns (blocks, column_count, markdown_text).
+        """
+        if not lines:
+            return [], 1, ""
+
+        col_indices = sorted(list(set(l.column_index for l in lines)))
+        col_count = len(col_indices) if col_indices else 1
+
+        line_metrics = []
+        for l in lines:
+            xs = [pt[0] for pt in l.box]
+            ys = [pt[1] for pt in l.box]
+            x_min, x_max = float(min(xs)), float(max(xs))
+            y_min, y_max = float(min(ys)), float(max(ys))
+            w = max(1.0, x_max - x_min)
+            h = max(1.0, y_max - y_min)
+            line_metrics.append({
+                "line": l,
+                "x_min": x_min,
+                "x_max": x_max,
+                "y_min": y_min,
+                "y_max": y_max,
+                "w": w,
+                "h": h,
+                "center_x": (x_min + x_max) / 2.0,
+                "center_y": (y_min + y_max) / 2.0,
+            })
+
+        heights = [m["h"] for m in line_metrics]
+        median_h = float(np.median(heights)) if heights else 20.0
+
+        gaps = []
+        for i in range(len(line_metrics) - 1):
+            curr_m, next_m = line_metrics[i], line_metrics[i + 1]
+            if curr_m["line"].column_index == next_m["line"].column_index:
+                gap = next_m["y_min"] - curr_m["y_max"]
+                if gap > 0:
+                    gaps.append(gap)
+        median_gap = float(np.median(gaps)) if gaps else (median_h * 0.4)
+
+        blocks: list[LayoutBlock] = []
+        current_block_lines: list[TextLine] = []
+        current_block_type: str = "paragraph"
+        current_col: int = line_metrics[0]["line"].column_index
+
+        def flush_block():
+            nonlocal current_block_lines, current_block_type, current_col
+            if not current_block_lines:
+                return
+            b_xs = [pt[0] for l in current_block_lines for pt in l.box]
+            b_ys = [pt[1] for l in current_block_lines for pt in l.box]
+            bbox = [min(b_xs), min(b_ys), max(b_xs), max(b_ys)]
+
+            if current_block_type == "paragraph":
+                block_text = " ".join(l.text for l in current_block_lines)
+            else:
+                block_text = "\n".join(l.text for l in current_block_lines)
+
+            avg_conf = float(np.mean([l.score for l in current_block_lines]))
+            blocks.append(LayoutBlock(
+                block_id=len(blocks) + 1,
+                block_type=current_block_type,
+                column_index=current_col,
+                bbox=bbox,
+                lines=list(current_block_lines),
+                text=block_text,
+                confidence=avg_conf,
+            ))
+            current_block_lines = []
+
+        for i, m in enumerate(line_metrics):
+            l = m["line"]
+            line_h = m["h"]
+            line_w = m["w"]
+            line_ymin = m["y_min"]
+            line_ymax = m["y_max"]
+            is_col_change = (l.column_index != current_col)
+
+            # Heuristics for semantic layout categorization
+            is_footer = (line_ymin > img_h * 0.90 and len(l.text.split()) <= 4)
+            is_title = (line_h >= median_h * 1.45 or (i == 0 and line_h >= median_h * 1.25 and line_w > img_w * 0.4))
+            is_header = (not is_title and (line_h >= median_h * 1.18 or (line_w < (img_w / max(1, col_count)) * 0.55 and len(l.text.split()) <= 6 and i > 0 and (line_ymin - line_metrics[i-1]["y_max"]) > median_gap * 1.5)))
+
+            # Tabular alignment detection (multiple cells in same horizontal line)
+            is_table_cell = False
+            if i + 1 < len(line_metrics):
+                nxt = line_metrics[i + 1]
+                overlap_y = max(0.0, min(line_ymax, nxt["y_max"]) - max(line_ymin, nxt["y_min"]))
+                if overlap_y / max(1.0, min(line_h, nxt["h"])) > 0.5 and abs(nxt["center_x"] - m["center_x"]) > line_w * 0.4:
+                    is_table_cell = True
+            if i > 0:
+                prv = line_metrics[i - 1]
+                overlap_y = max(0.0, min(line_ymax, prv["y_max"]) - max(line_ymin, prv["y_min"]))
+                if overlap_y / max(1.0, min(line_h, prv["h"])) > 0.5 and abs(prv["center_x"] - m["center_x"]) > line_w * 0.4:
+                    is_table_cell = True
+
+            target_type = "paragraph"
+            if is_title:
+                target_type = "title"
+            elif is_header:
+                target_type = "header"
+            elif is_footer:
+                target_type = "footer"
+            elif is_table_cell:
+                target_type = "table"
+
+            gap_from_prev = 0.0
+            if current_block_lines and not is_col_change:
+                gap_from_prev = line_ymin - line_metrics[i - 1]["y_max"]
+
+            start_new = (
+                is_col_change
+                or (target_type != current_block_type)
+                or (target_type in {"title", "header", "footer"})
+                or (current_block_type in {"title", "header", "footer"})
+                or (current_block_type == "paragraph" and gap_from_prev > max(median_gap * 2.2, median_h * 1.6))
+            )
+
+            if start_new and current_block_lines:
+                flush_block()
+                current_block_type = target_type
+                current_col = l.column_index
+            elif not current_block_lines:
+                current_block_type = target_type
+                current_col = l.column_index
+
+            current_block_lines.append(l)
+
+        flush_block()
+
+        # Build Markdown text representation
+        md_parts: list[str] = []
+        for b in blocks:
+            if b.block_type == "title":
+                md_parts.append(f"# {b.text}\n")
+            elif b.block_type == "header":
+                md_parts.append(f"## {b.text}\n")
+            elif b.block_type == "table":
+                table_lines = [f"| {l.text} |" for l in b.lines]
+                md_parts.append("\n".join(table_lines) + "\n")
+            elif b.block_type == "footer":
+                md_parts.append(f"*{b.text}*\n")
+            else:
+                md_parts.append(f"{b.text}\n")
+
+        markdown_text = "\n".join(md_parts).strip()
+        return blocks, col_count, markdown_text
+
+    @classmethod
+    def _draw_layout_annotations(
+        cls,
+        img: np.ndarray,
+        blocks: list[LayoutBlock],
+        column_count: int = 1,
+    ) -> np.ndarray:
+        """Render high-resolution visual layout masks, bounding boxes, and semantic badges."""
+        canvas = img.copy()
+        overlay = img.copy()
+        img_h, img_w = img.shape[:2]
+
+        color_map = {
+            "title": (180, 50, 180),      # Deep Violet / Magenta
+            "header": (220, 130, 20),     # Vibrant Blue
+            "paragraph": (60, 180, 75),   # Emerald / Forest Green
+            "table": (20, 140, 240),      # Amber / Orange
+            "footer": (140, 140, 140),    # Slate Gray
+            "caption": (190, 150, 40),    # Cyan / Teal
+        }
+
+        # Step 1: Draw translucent filled region for each block
+        for b in blocks:
+            color = color_map.get(b.block_type, (60, 180, 75))
+            x1, y1, x2, y2 = [int(c) for c in b.bbox]
+            pad = 4
+            x1 = max(0, x1 - pad)
+            y1 = max(0, y1 - pad)
+            x2 = min(img_w - 1, x2 + pad)
+            y2 = min(img_h - 1, y2 + pad)
+            cv2.rectangle(overlay, (x1, y1), (x2, y2), color, -1)
+
+        cv2.addWeighted(overlay, 0.18, canvas, 0.82, 0, canvas)
+
+        # Step 2: Draw borders and semantic badges
+        for b in blocks:
+            color = color_map.get(b.block_type, (60, 180, 75))
+            x1, y1, x2, y2 = [int(c) for c in b.bbox]
+            pad = 4
+            x1 = max(0, x1 - pad)
+            y1 = max(0, y1 - pad)
+            x2 = min(img_w - 1, x2 + pad)
+            y2 = min(img_h - 1, y2 + pad)
+
+            cv2.rectangle(canvas, (x1, y1), (x2, y2), color, 2)
+
+            if b.block_type == "title":
+                badge_str = f"H1 TITLE #{b.block_id}"
+            elif b.block_type == "header":
+                badge_str = f"H2 HEADER #{b.block_id}"
+            elif b.block_type == "table":
+                badge_str = f"TABLE #{b.block_id} ({len(b.lines)} cells)"
+            elif b.block_type == "footer":
+                badge_str = f"FOOTER #{b.block_id}"
+            else:
+                badge_str = f"P #{b.block_id} ({len(b.lines)} lines)"
+
+            font_scale = 0.42
+            font_thick = 1
+            (tw, th), _ = cv2.getTextSize(badge_str, cv2.FONT_HERSHEY_SIMPLEX, font_scale, font_thick)
+
+            bx1 = min(img_w - tw - 12, max(0, x2 - tw - 8))
+            by1 = max(0, y1 - th - 8)
+            bx2 = bx1 + tw + 8
+            by2 = by1 + th + 6
+
+            if by1 < 4:
+                by1 = y1 + 2
+                by2 = by1 + th + 6
+
+            cv2.rectangle(canvas, (bx1, by1), (bx2, by2), (15, 23, 42), -1)
+            cv2.rectangle(canvas, (bx1, by1), (bx2, by2), color, 1)
+            cv2.putText(
+                canvas,
+                badge_str,
+                (bx1 + 4, by2 - 4),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                font_scale,
+                (255, 255, 255),
+                font_thick,
+                cv2.LINE_AA,
+            )
+
+        return canvas
+
+    @classmethod
+    def _draw_line_annotations(
+        cls,
+        img: np.ndarray,
+        lines: list[TextLine],
+    ) -> np.ndarray:
+        """Render precise line-level detection polygons and sequence IDs."""
+        canvas = img.copy()
+        for line in lines:
+            pts = np.array(line.box, dtype=np.int32).reshape((-1, 1, 2))
+            col_idx = line.column_index
+            box_color = (212, 182, 6) if col_idx == 0 else (6, 212, 182)
+            cv2.polylines(canvas, [pts], isClosed=True, color=box_color, thickness=2)
+
+            xs = [p[0] for p in line.box]
+            ys = [p[1] for p in line.box]
+            badge_x = int(max(xs))
+            badge_y = int(min(ys))
+
+            cv2.circle(canvas, (badge_x, badge_y), 9, (6, 182, 212), -1)
+            num_str = str(line.line_number)
+            cv2.putText(
+                canvas,
+                num_str,
+                (badge_x - (4 if len(num_str) == 1 else 6), badge_y + 4),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.32,
+                (0, 0, 0),
+                1,
+                cv2.LINE_AA,
+            )
+        return canvas
+
     def read_document(
         self,
         image_input: Union[str, Path, np.ndarray],
@@ -315,7 +623,6 @@ class DocumentReader:
         # Fallback: if detection finds 0 boxes, check if this is a cropped text line
         if dt_boxes is None or len(dt_boxes) == 0:
             if img_h < 150 or (img_w / max(1, img_h) > 2.0):
-                # Try recognizing whole image directly
                 t_rec_0 = time.perf_counter()
                 tf = tempfile.NamedTemporaryFile(suffix=".jpg", delete=False)
                 cv2.imwrite(tf.name, img)
@@ -337,10 +644,23 @@ class DocumentReader:
                         box=[[0, 0], [img_w, 0], [img_w, img_h], [0, img_h]],
                         line_number=1,
                     )
+                    block = LayoutBlock(
+                        block_id=1,
+                        block_type="paragraph",
+                        column_index=0,
+                        bbox=[0, 0, img_w, img_h],
+                        lines=[line],
+                        text=line.text,
+                        confidence=line.score,
+                    )
                     return DocumentResult(
                         full_text=line.text,
                         lines=[line],
+                        markdown_text=line.text,
+                        blocks=[block],
+                        column_count=1,
                         annotated_image=img if annotate else None,
+                        annotated_layout_image=img if annotate else None,
                         timing_ms={"det_ms": round(det_ms, 1), "rec_ms": round(rec_ms, 1), "total_ms": round(total_ms, 1)},
                         page_number=page_number,
                     )
@@ -349,7 +669,11 @@ class DocumentReader:
             return DocumentResult(
                 full_text="",
                 lines=[],
+                markdown_text="",
+                blocks=[],
+                column_count=1,
                 annotated_image=img if annotate else None,
+                annotated_layout_image=img if annotate else None,
                 timing_ms={"det_ms": round(det_ms, 1), "rec_ms": 0.0, "total_ms": round(total_ms, 1)},
                 page_number=page_number,
             )
@@ -390,16 +714,14 @@ class DocumentReader:
         # Step 5: Assemble recognized lines
         lines: list[TextLine] = []
         line_texts: list[str] = []
-        annotated = img.copy() if annotate else None
-
         line_counter = 1
+
         for i, (box, col_idx, p) in enumerate(zip(sorted_boxes, col_indices, preds)):
             score = float(p.score)
             text = p.text.strip()
             if not text or score < min_score:
                 continue
 
-            pts = box.astype(np.int32).reshape((-1, 1, 2))
             lines.append(TextLine(
                 text=text,
                 score=round(score, 4),
@@ -408,33 +730,27 @@ class DocumentReader:
                 column_index=col_idx,
             ))
             line_texts.append(text)
-
-            if annotated is not None:
-                # Color code: cyan for single/col0, green for col1
-                box_color = (212, 182, 6) if col_idx == 0 else (6, 212, 182)
-                cv2.polylines(annotated, [pts], isClosed=True, color=box_color, thickness=2)
-                x_min, y_min = int(box[:, 0].min()), int(box[:, 1].min())
-                cv2.circle(annotated, (x_min, y_min), 10, (6, 182, 212), -1)
-                cv2.putText(
-                    annotated,
-                    str(line_counter),
-                    (x_min - 4, y_min + 4),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.35,
-                    (0, 0, 0),
-                    1,
-                    cv2.LINE_AA,
-                )
-
             line_counter += 1
 
         full_text = "\n".join(line_texts)
+
+        # Step 6: Semantic Layout Analysis
+        blocks, col_count, markdown_text = self._analyze_document_layout(lines, img_w=img_w, img_h=img_h)
+
+        # Step 7: Annotations
+        annotated_line = self._draw_line_annotations(img, lines) if annotate else None
+        annotated_layout = self._draw_layout_annotations(img, blocks, col_count) if annotate else None
+
         total_ms = (time.perf_counter() - t_start) * 1000.0
 
         return DocumentResult(
             full_text=full_text,
             lines=lines,
-            annotated_image=annotated,
+            markdown_text=markdown_text,
+            blocks=blocks,
+            column_count=col_count,
+            annotated_image=annotated_line,
+            annotated_layout_image=annotated_layout,
             timing_ms={
                 "det_ms": round(det_ms, 1),
                 "rec_ms": round(rec_ms, 1),
@@ -442,6 +758,54 @@ class DocumentReader:
             },
             page_number=page_number,
         )
+
+    def read_pdf_page(
+        self,
+        pdf_input: Union[str, Path, bytes],
+        page_number: int = 1,
+        dpi: int = 200,
+        min_score: float = 0.3,
+        annotate: bool = True,
+    ) -> tuple[DocumentResult, int]:
+        """Process a single page of a PDF document directly without loading the entire document.
+        Returns (DocumentResult, total_pages).
+        """
+        if not HAS_PYMUPDF:
+            raise ImportError("PyMuPDF ('fitz') is required for PDF reading. Install via: pip install pymupdf")
+
+        if isinstance(pdf_input, bytes):
+            doc = fitz.open(stream=pdf_input, filetype="pdf")
+        else:
+            pdf_p = Path(pdf_input).resolve()
+            if not pdf_p.is_file():
+                raise FileNotFoundError(f"PDF document not found: {pdf_p}")
+            doc = fitz.open(str(pdf_p))
+
+        total_pages = len(doc)
+        if total_pages == 0:
+            doc.close()
+            raise ValueError("PDF contains no pages")
+
+        p_idx = max(0, min(page_number - 1, total_pages - 1))
+        page = doc.load_page(p_idx)
+
+        zoom = dpi / 72.0
+        matrix = fitz.Matrix(zoom, zoom)
+        pix = page.get_pixmap(matrix=matrix, alpha=False)
+        img_bgr = cv2.cvtColor(
+            np.frombuffer(pix.samples, dtype=np.uint8).reshape(pix.height, pix.width, 3),
+            cv2.COLOR_RGB2BGR,
+        )
+        doc.close()
+
+        res = self.read_document(
+            image_input=img_bgr,
+            min_score=min_score,
+            annotate=annotate,
+            page_number=p_idx + 1,
+        )
+        res.total_pages = total_pages
+        return res, total_pages
 
     def read_pdf(
         self,
@@ -483,6 +847,7 @@ class DocumentReader:
                 annotate=annotate,
                 page_number=p_idx + 1,
             )
+            p_res.total_pages = total_doc_pages
             page_results.append(p_res)
 
             if progress_callback:

@@ -34,7 +34,12 @@ Launch production training:
 
 ### 3. Use the Exported Model
 The repository includes a ready-to-use model in `export/kurdish_final/`:
-- **Web Browser Studio**: Double-click [`studio.bat`](file:///C:/Users/A/Desktop/Tools%20-%20QAI%20Enviroment/qai-ocr/qai-paddle-ocr-finetuning-main/studio.bat) (opens [http://127.0.0.1:8501](http://127.0.0.1:8501)).
+- **Full-Page & Layout Web Studio**: Double-click [`studio.bat`](file:///C:/Users/A/Desktop/Tools%20-%20QAI%20Enviroment/qai-ocr/qai-paddle-ocr-finetuning-main/studio.bat) (opens [http://127.0.0.1:8501](http://127.0.0.1:8501)):
+  - **Full-Page & Multi-Page PDF**: Drag-and-drop high-res A4 scans, photos, or multi-page PDF books with fast interactive page navigation (`◀ Prev` / `Next ▶`).
+  - **Semantic Layout Detection**: Automatically detects H1 Titles, H2 Headers, Paragraphs, Tables, and Footers with column-aware RTL reading order.
+  - **Interactive Canvas**: High-res document viewer with Zoom (`+`, `-`, `Fit`, `100%`), mouse pan, and view switcher (`Layout Blocks`, `Line Boxes`, `Clean Page`).
+  - **Structured Reader & Editor**: Formatted Kurdish reader, live Markdown editor, searchable line inspector, and JSON AST.
+  - **Multi-Format Export**: One-click download as `.md`, `.txt`, `.json`, or annotated `.jpg`.
 - **Quick Image Test**: Run `.\infer.bat --split test --count 5`.
 - **Read Full PDF / Book**: Run `.\read.bat -i my_book.pdf -o ./extracted_book`.
 
