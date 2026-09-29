@@ -143,6 +143,7 @@ $python = $venvPython
 $previousPreference = $ErrorActionPreference
 $ErrorActionPreference = 'Continue'
 
+try {
     $uv = Get-Command uv -ErrorAction SilentlyContinue
     if ($uv) {
         Write-QaiOk "uv package manager detected ($(& uv --version)) - utilizing ultra-fast caching"
@@ -161,6 +162,15 @@ $ErrorActionPreference = 'Continue'
         $nvidiaGpu = Get-QaiNvidiaGpu
         $smi = Get-QaiNvidiaSmi
         $hasNvidia = ($null -ne $nvidiaGpu) -or ($null -ne $smi)
+        $gpuTitle = if ($nvidiaGpu) { $nvidiaGpu.Name } else { "NVIDIA GPU" }
+        $cudaVer = 0.0
+
+        if ($smi) {
+            $smiOut = & $smi 2>$null
+            if ($smiOut -match 'CUDA Version:\s*([0-9]+\.[0-9]+)') {
+                $cudaVer = [double]$matches[1]
+            }
+        }
 
         $isBlackwellOr50 = ($gpuTitle -match "RTX 50|Blackwell") -or ($cudaVer -ge 12.8) -or ($cudaVer -ge 13.0)
         $installedGpu = $false
