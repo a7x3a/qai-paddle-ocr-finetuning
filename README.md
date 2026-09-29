@@ -1,442 +1,201 @@
-# Kurdish OCR Recognition Fine-Tuning (PaddleOCR)
+# 🚀 Kurdish PaddleOCR Fine-Tuning & Document Reader
 
-A simple, production-ready framework to fine-tune **PaddleOCR v5** on Kurdish text (**Sorani** Arabic-script and **Kurmanji** Latin-script).
+A simple, production-ready framework to fine-tune and deploy **PaddleOCR PP-OCRv5** on Kurdish text (**Sorani** Arabic-script and **Kurmanji** Latin-script) without catastrophic forgetting of Arabic and English.
 
-Works out of the box on **Windows**, **Linux**, and **Google Colab Free GPU**.
+Works out of the box on **Windows**, **Linux**, and **Google Colab (Free T4 GPU)**.
 
 ---
 
-## What Should I Do? (Step-by-Step Guide)
-
-Follow these simple steps from start to finish:
+## ⚡ Quick Start (3 Steps)
 
 ```mermaid
 flowchart LR
-    A["1. Run Setup\n(setup.bat / setup.sh)"] --> B["2. Smoke Test\n(Verify GPU & Loop)"]
-    B --> C["3. Train Model\n(40 Epochs)"]
-    C --> D["4. Export Model\n(Lightweight PIR)"]
-    D --> E["5. Run OCR\n(On Your Images)"]
+    A["1. setup.bat\n(Auto-install deps & models)"] --> B["2. train.bat or pipeline.bat\n(Interactive RAM & resource selection)"] --> C["3. studio.bat or read.bat\n(Web UI or PDF/Book OCR)"]
 ```
 
----
-
-### Step 1: Install Everything on a Fresh PC (1-Click)
-
-> [!IMPORTANT]
-> **Zero Prior Configuration Needed**:
-> When setting up on a completely clean/wiped PC, `setup.bat` handles everything automatically:
-> - Installs Microsoft Visual C++ Runtime (if missing via `winget`).
-> - Installs 64-bit Python 3.12 (if missing via `winget`).
-> - Utilizes **`uv`** for lightning-fast package caching and dependency installation.
-> - Automatically detects your GPU architecture:
->   - **RTX 50-series / Blackwell**: Installs `paddlepaddle-gpu==3.4.0` (cu129).
->   - **RTX 40/30/20-series / Ada Lovelace**: Installs `paddlepaddle-gpu==3.3.1` (cu126/cu118).
->   - **No GPU**: Falls back cleanly to CPU-optimized `paddlepaddle==3.3.1`.
-> - Clones and pins the official PaddleOCR repository.
-> - Downloads the official base model weights and extracts the 162,000+ Kurdish dataset from Hugging Face.
-
-Clone the repo and run the automated setup:
-
-- **On Windows**:
+### 1. Setup (One-Click)
+Clone the repository and run setup:
+- **Windows**: Double-click [`setup.bat`](file:///C:/Users/A/Desktop/Tools%20-%20QAI%20Enviroment/qai-ocr/qai-paddle-ocr-finetuning-main/setup.bat) or run:
   ```cmd
-  git clone https://github.com/a7x3a/qai-paddle-ocr-finetuning.git
-  cd qai-paddle-ocr-finetuning
   setup.bat
   ```
-  *(Or simply double-click `setup.bat` in File Explorer).*
-
-- **On Linux / WSL / Google Colab**:
+- **Linux / Colab**:
   ```bash
-  git clone https://github.com/a7x3a/qai-paddle-ocr-finetuning.git
-  cd qai-paddle-ocr-finetuning
   bash scripts/setup.sh
   ```
+*`setup` automatically installs Python, GPU-optimized PaddlePaddle, `uv`, base pretrained weights, and the 162,000+ sample Kurdish dataset.*
 
-- **Instant Out-Of-The-Box Testing**:
-  Because this repository pre-bundles the production-exported model (`export/kurdish_final`) and text detector (`assets/base_det_inference`), you can immediately read books or test samples right after setup:
-  ```bash
-  # Option A: One-click interactive studio (or run .\studio.bat on Windows):
-  python main.py serve
+### 2. Fine-Tune
+Launch production training:
+```powershell
+.\train.bat
+```
+*(The interactive hardware configurator will open automatically in your terminal, reserve 15 GB RAM for your system, and let you select the optimal batch size & worker pool).*
 
-  # Option B: Test on unseen test images (or run .\infer.bat):
-  python main.py infer --split test --count 5
-
-  # Option C: Read a full PDF document or scanned book:
-  python main.py read --input path/to/document.pdf --output-dir ./extracted
-  ```
-  *(Note: Run with `.venv\Scripts\activate` first, or use `uv run python main.py ...`)*
+### 3. Use the Exported Model
+The repository includes a ready-to-use model in `export/kurdish_final/`:
+- **Web Browser Studio**: Double-click [`studio.bat`](file:///C:/Users/A/Desktop/Tools%20-%20QAI%20Enviroment/qai-ocr/qai-paddle-ocr-finetuning-main/studio.bat) (opens [http://127.0.0.1:8501](http://127.0.0.1:8501)).
+- **Quick Image Test**: Run `.\infer.bat --split test --count 5`.
+- **Read Full PDF / Book**: Run `.\read.bat -i my_book.pdf -o ./extracted_book`.
 
 ---
 
-### Step 2: Verify Your Hardware (5 Seconds)
+## 🖥️ Interactive Resource & Memory Configurator
 
-Run a quick hardware check to make sure your GPU, VRAM, and gradient loop work:
+When running `.\train.bat`, `.\pipeline.bat`, or `python main.py train`, the system dynamically detects your hardware and presents an interactive CLI selector:
 
-```bash
-python main.py smoke-test
+```text
+==============================================================================
+ [HARDWARE] KURDISH OCR HARDWARE & MEMORY ALLOCATION CONFIGURATOR
+==============================================================================
+  System Hardware Detected:
+    * Active Compute:    NVIDIA GeForce RTX 5060 (8192 MB VRAM)
+    * CPU Architecture:  16 Cores (32 Threads)
+    * Total System RAM:  64.0 GB
+    * Current Free RAM:  50.2 GB
+    * OS Safety Guard:   15.0 GB (Preserved strictly free for OS & Desktop)
+    * Usable for Train:  35.2 GB (All remaining RAM devoted to OCR training)
+------------------------------------------------------------------------------
+  Select Resource Preset Profile for Training:
+
+  [1] High Throughput / Max Performance [RECOMMENDED]
+      * Train Batch: 384  | Eval Batch: 256  | DataLoader Workers: 12
+      * Est. RAM: ~6.5 GB | Projected Free RAM: ~43.7 GB (Safety: >= 15.0 GB)
+      * Max GPU saturation and high worker parallelism utilizing all left RAM while preserving 15 GB free
+
+  [2] Balanced Workload
+      * Train Batch: 256  | Eval Batch: 128  | DataLoader Workers: 8
+      * Est. RAM: ~5.1 GB | Projected Free RAM: ~45.1 GB
+
+  [3] Conservative / Low RAM Overhead
+      * Train Batch: 128  | Eval Batch: 64   | DataLoader Workers: 4
+      * Est. RAM: ~3.8 GB | Projected Free RAM: ~46.4 GB
+
+  [4] Custom Manual Configuration
+      * Specify custom Batch Size, Worker Count, and Pinned Memory directly
+------------------------------------------------------------------------------
+  Select option [1-4] (Press Enter for [1] Recommended): 
 ```
 
-If you see `ALL SMOKE TEST CHECKS PASSED`, you're ready to train!
+- **Press `Enter`**: Automatically uses **Preset 1 (Recommended)** for maximum training speed.
+- **Select `4` (Custom)**: Enter your own exact batch size and worker count directly.
+- **15 GB Free RAM Guard**: Strictly keeps 15.0 GB of host RAM completely free for your operating system and desktop apps, devoting all remaining memory to training.
 
 ---
 
-### Step 3: (Optional) Run a Quick Pilot Test
+## 📋 1-Click Windows Runners (`.bat`) & CLI Reference
 
-Before doing the long training run, test convergence on a small subset (500 samples, 2 epochs, takes ~1 minute):
+All runners automatically use the local virtual environment (`.venv`):
 
-```bash
-python main.py pilot-run --num-samples 500 --max-epochs 2
-```
-
-This verifies that loss decreases and checkpoints save properly.
-
----
-
-### Step 4: Fine-Tune the Full Model
-
-Start the production training run on the entire Kurdish dataset:
-
-```bash
-python main.py train --epochs 40
-```
-
-> **Full Hardware & Performance Control (Optimized for High-RAM & Multi-Core Workstations):**
-> - **Full Worker Freedom (`--workers <N>`)**: On high-RAM systems (e.g. 64 GB RAM, 32 CPU cores), pass `--workers 8`, `--workers 12`, `--workers 16`, or `--workers 24` to supercharge DataLoader throughput. Your explicit `--workers` setting is strictly honored without artificial throttling.
-> - **Batch Size Control (`--batch-size <N>` & `--eval-batch-size <N>`)**: Customize training and validation batch sizes (e.g. `--batch-size 256 --eval-batch-size 256` or `512` on RTX 5060).
-> - **Prediction & Image Resolution (`--image-shape <C,H,W>`)**: Adjust prediction input resolution (e.g. `--image-shape 3,48,320` or `--image-shape 3,48,640` for long Kurdish words) and `--max-text-length 64`.
-> - **Page-Locked CUDA Pinned Memory (`pin_memory`)**: Automatically active by default for direct zero-copy DMA streaming from host RAM to GPU VRAM.
-> - **Mixed Precision (`amp_level: "O2"`)**: Fully activates RTX Tensor Cores to maximize training throughput.
-> - **Auto-Checkpoints**: Best and latest weights continuously preserved in `output/production_run/checkpoints/`.
+| Runner Shortcut | Python CLI Command | What It Does | Est. Time *(RTX 5060)* | Output Directory |
+| :--- | :--- | :--- | :---: | :--- |
+| **`setup.bat`** | `python main.py setup` | Installs dependencies, Paddle-GPU, clones PaddleOCR, downloads dataset | ~2–5 min | `.venv/`, `data/` |
+| **`smoke.bat`** | `python main.py smoke-test` | Fast 5-second pre-flight test verifying GPU, VRAM, and gradient pass | ~10 sec | Terminal |
+| **`pipeline.bat`** | `python main.py pipeline` | **Automated 7-Stage Pipeline**: Smoke → Baseline → Pilot → Train → Benchmark → Export → Unseen | ~18–30 min | `benchmarks/v{n}/`<br>`outputs/v{n}/`<br>`export/v{n}/` |
+| **`train.bat`** | `python main.py train` | Full production fine-tuning on entire dataset (40 epochs) with auto-checkpoints | ~15–25 min | `outputs/v{n}/production_run/` |
+| **`pilot.bat`** | `python main.py pilot-run` | Mini convergence check (500 samples, 2 mini-epochs) | ~1 min | `outputs/v{n}/pilot/` |
+| **`export.bat`** | `python main.py export` | Exports best trained checkpoint to deployable PIR inference format | ~5 sec | `export/kurdish_final/` |
+| **`infer.bat`** | `python main.py infer` | Runs text recognition on test images with ground-truth comparison table | ~3 sec | Terminal Table |
+| **`studio.bat`** | `python main.py serve` | Launches interactive browser web UI for drag-and-drop Kurdish OCR | Instant | [http://127.0.0.1:8501](http://127.0.0.1:8501) |
+| **`read.bat`** | `python main.py read` | Full-page PDF or book OCR with DBNet text detection and RTL layout sorting | ~5–10 s/page | `extracted_documents/` |
 
 ---
 
-### Step 5: Export the Trained Model
+## 🚀 1-Click Automated Pipeline (`pipeline.bat`)
 
-When training is complete, export the best checkpoint into lightweight deployment format:
+To execute the entire MLOps workflow unattended:
 
-```bash
-python main.py export
+```powershell
+.\pipeline.bat --epochs 40
 ```
 
-The exported model is saved in `export/kurdish_final/`:
-- `inference.json` (model architecture)
-- `inference.pdiparams` (model weights)
-- `inference.yml` (configuration)
-- `arabic_kurdish_dict.txt` (747-character dictionary)
+### The 7 Automated Stages:
+1. **Pre-Flight Smoke Test**: Checks CUDA compute capability and gradient pass.
+2. **Baseline Benchmark**: Evaluates un-finetuned foundation model zero-shot (~18% accuracy).
+3. **Pilot Convergence Check**: Rapid 2-epoch mini-run to verify loss decrease.
+4. **Full Production Training**: Trains 40 epochs on 162k Kurdish samples with AMP O2 and pinned memory.
+5. **Checkpoint Benchmarking**: Auto-evaluates all saved checkpoints to find the peak accuracy model.
+6. **Deployable Model Export**: Converts best weights into PIR inference format.
+7. **Unseen Multilingual Generalization**: Tests against unseen Kurdish, Arabic, and numeric test sets.
 
----
+All results are automatically organized into versioned folders (`benchmarks/v1/`, `benchmarks/v2/`, etc.) with a markdown comparison leaderboard:
 
-### Step 6: Test Recognition on Images
-
-#### 1. Test on random test images with ground-truth comparison:
-```bash
-python main.py infer --split test --count 5
 ```
-
-#### 2. Recognize Kurdish text on your own image:
-```bash
-python main.py infer --image path/to/your_image.jpg
-```
-
-#### 3. Use in your own Python project:
-```python
-from pathlib import Path
-from scripts.lib.recognizer import Recognizer
-
-# Load the exported Kurdish model
-recognizer = Recognizer(model_dir=Path("export/kurdish_final"), use_gpu=True)
-
-# Run prediction
-predictions, timing = recognizer.predict_paths([Path("my_kurdish_text.jpg")])
-
-for pred in predictions:
-    print(f"Recognized Kurdish Text: {pred.text} (Confidence: {pred.score:.4f})")
+├── benchmarks/v{n}/
+│   ├── leaderboard.md          # Visual comparison table (Baseline vs Checkpoints vs Unseen)
+│   ├── summary.json            # Consolidated JSON metrics
+│   ├── baseline/               # Foundation zero-shot metrics
+│   ├── pilot/                  # Pilot convergence metrics
+│   ├── full/                   # Per-epoch checkpoint evaluations
+│   └── unseen/                 # Multilingual test breakdown
+├── outputs/v{n}/               # Checkpoints (.pdparams) and exact runtime_config.yml
+└── export/v{n}/                # Deployable PIR inference models (mirrored to export/kurdish_final/)
 ```
 
 ---
 
-## Running on Google Colab (Free T4 GPU)
+## 📖 Multi-Page PDF & Book Reading
 
-You can train completely for free on Google Colab:
+To OCR a full multi-page PDF book or a folder of scanned book pages:
 
-1. Open Google Colab, go to **Runtime** → **Change runtime type** → select **T4 GPU**.
-2. Run these cells in order:
+```powershell
+# Read an entire PDF document or book
+.\read.bat -i my_kurdish_book.pdf -o ./extracted_book
 
+# Read a folder of scanned page images
+.\read.bat -i ./scanned_pages/ -o ./extracted_book
+
+# Adjust DPI for sharp text extraction
+.\read.bat -i my_scan.pdf --dpi 300 -o ./extracted_book
+```
+
+### Generated Outputs:
+- `book.md`: Structured Markdown with `# Page N` headers, paragraphs, and reading order.
+- `book.txt`: Plain text representation.
+- `book.json`: Line-by-line bounding coordinates, confidence scores, and latencies.
+- `annotated_pages/`: Visualizations showing detected text bounding polygons.
+
+---
+
+## 🌐 Google Colab Guide (Free T4 GPU)
+
+You can train completely free in Google Colab:
+1. Set runtime to **T4 GPU** (*Runtime* → *Change runtime type* → *T4 GPU*).
+2. Execute:
 ```bash
-# 1. Clone repository
 !git clone https://github.com/a7x3a/qai-paddle-ocr-finetuning.git
 %cd qai-paddle-ocr-finetuning
-
-# 2. Setup (installs GPU packages, downloads base model and dataset)
 !bash scripts/setup.sh
-
-# 3. Train the model
-!python main.py train --epochs 40
-
-# 4. Export model
-!python main.py export
+!python main.py pipeline --epochs 40 --no-interactive
 ```
 
 ---
 
-## All Commands Reference & Execution Times
+## ⚙️ Advanced CLI Flags
 
-Each command has a **1-click Windows runner (`.bat`)** that automatically runs in `.venv` without manual activation:
-
-| Command & Shortcut | What It Does (Simple Explanation) | Estimated Time *(RTX 5060 / 32 cores / 64GB RAM)* | Output Folder (Versioned) |
-| :--- | :--- | :---: | :--- |
-| **`setup.bat`**<br>`python main.py setup` | Installs Python, C++ runtimes, PaddlePaddle-GPU, clones PaddleOCR, downloads base models & extracts dataset | ~2–5 min | `.venv/`, `data/`, `pretrain_models/` |
-| **`smoke.bat`**<br>`python main.py smoke-test` | Fast hardware pre-flight test. Verifies CUDA GPU device, VRAM allocation, and runs a 1-step backward gradient pass | ~10–15 sec | Terminal (pass/fail verification) |
-| **`benchmark.bat`**<br>`python main.py benchmark-base` | Evaluates un-finetuned foundation model zero-shot on Kurdish validation set to establish baseline accuracy | ~30–60 sec | `benchmarks/v{n}/baseline/` |
-| **`pilot.bat`**<br>`python main.py pilot-run` | Rapid convergence test on a small subset (500 samples, 2 epochs). Verifies loss drop and checkpoint saving | ~1–2 min | `outputs/v{n}/pilot/`<br>`benchmarks/v{n}/pilot/` |
-| **`train.bat`**<br>`python main.py train` | Full production fine-tuning on entire dataset (40 epochs) with cosine decay learning rate and auto-checkpoints | ~15–30 min | `outputs/v{n}/production_run/`<br>`checkpoints/` |
-| **`export.bat`**<br>`python main.py export` | Converts best trained checkpoint (`best_accuracy.pdparams`) into lightweight deployable PIR inference model | ~5–10 sec | `export/v{n}/`<br>`export/kurdish_final/` |
-| **`infer.bat`**<br>`python main.py infer` | Runs text recognition inference on sample images or unseen test splits with ground truth comparisons | ~2–5 sec | Terminal table (Accuracy & CER) |
-| **`read.bat`**<br>`python main.py read` | Full-page PDF or book OCR with DBNet text detection and Right-to-Left (RTL) column-aware sorting | ~5–15 sec / page | `extracted_documents/`<br>(`.md`, `.txt`, `.json`) |
-| **`pipeline.bat`**<br>`python main.py pipeline` | **1-Click Automated Pipeline**: Executes all 7 stages end-to-end unattended with automatic versioning | ~18–35 min *(total)* | `benchmarks/v{n}/`<br>`outputs/v{n}/`<br>`export/v{n}/` |
-
----
-
-## 🚀 1-Click Automated End-to-End Pipeline (`pipeline.bat`)
-
-If you want to run the entire fine-tuning and benchmarking process from start to finish without typing commands manually, use the automated pipeline:
+You can customize parameters directly without the interactive prompt:
 
 ```powershell
-# Windows 1-click shortcut:
-.\pipeline.bat --epochs 40 --batch-size 384 --workers 16
+# Custom batch size, worker pool, and RAM reservation
+python main.py train --batch-size 384 --workers 16 --reserve-ram-gb 15.0
 
-# Or standard CLI:
-python main.py pipeline --epochs 40 --batch-size 384 --workers 16
-```
+# Disable interactive prompt in automated scripts
+python main.py train --no-interactive
 
-### What Happens Automatically (7 Stages):
-1. **[STAGE 1/7] Pre-Flight Smoke Test** (~10 sec): Verifies GPU compute capability, CUDA runtime, and autograd graph.
-2. **[STAGE 2/7] Baseline Benchmark** (~40 sec): Evaluates foundation model zero-shot accuracy to record pre-training metrics.
-3. **[STAGE 3/7] Pilot Convergence Run** (~1 min): Trains 2 mini-epochs on 200 samples to verify loss drop.
-4. **[STAGE 4/7] Full Production Training** (~15-25 min): Trains across all 40 epochs on 162,000+ Kurdish lines using pinned memory and mixed precision.
-5. **[STAGE 5/7] Checkpoint Auto-Benchmarking** (~1 min): Tests all saved checkpoints and selects the model with the highest exact accuracy.
-6. **[STAGE 6/7] Deployable Model Export** (~10 sec): Converts best checkpoint to PIR inference format and updates `export/kurdish_final`.
-7. **[STAGE 7/7] Unseen Generalization Benchmark** (~40 sec): Evaluates the exported model against unseen Kurdish, Arabic, and Numeric test data.
+# Force custom image resolution for wide/compound Kurdish lines
+python main.py train --image-shape 3,48,480 --max-text-length 48
 
-### Automatic Version Naming & Folder Organization:
-Each time you run the pipeline, it automatically increments version folders (`v1`, `v2`, `v3`...):
-
-```
-├── benchmarks/v{n}/                  # Benchmark reports & leaderboards
-│   ├── leaderboard.md                # Markdown leaderboard comparing Baseline vs Pilot vs All Epochs vs Unseen
-│   ├── summary.json                  # Aggregated JSON metrics across all stages
-│   ├── baseline/                     # Zero-shot baseline reports (.json & .md)
-│   ├── pilot/                        # Mini-run convergence reports (.json & .md)
-│   ├── full/                         # Per-epoch checkpoint evaluations (.json & .md)
-│   └── unseen/                       # Multilingual generalization report (.json & .md)
-│
-├── outputs/v{n}/                     # Training checkpoints & runtime configs
-│   ├── pilot/                        # Pilot run checkpoints & labels
-│   └── production_run/
-│       ├── checkpoints/              # iter_epoch_*.pdparams, best_accuracy.pdparams, latest.pdparams
-│       └── runtime_config.yml        # Exact YAML config used for this run
-│
-└── export/v{n}/                      # Deployable inference model
-    ├── inference.json                # PIR Model architecture graph
-    ├── inference.pdiparams           # Optimized inference weights
-    ├── inference.yml                 # Inference metadata
-    └── arabic_kurdish_dict.txt       # 747-character Kurdish dictionary
-```
-*(The latest active model is also mirrored to `export/kurdish_final/` for instant inference).*
-
----
-
-## 🛠️ Step-by-Step Manual Workflow (Alternative to Automated Pipeline)
-
-If you prefer executing each step manually instead of running the automated pipeline:
-
-1. **Verify Hardware**:
-   ```powershell
-   .\smoke.bat
-   ```
-   *Time: ~10 seconds. Confirms GPU is detected.*
-
-2. **Measure Zero-Shot Baseline**:
-   ```powershell
-   .\benchmark.bat --max-samples 100
-   ```
-   *Time: ~30 seconds. Measures accuracy of foundation model before Kurdish adaptation (~18%).*
-
-3. **Run Pilot Convergence Check**:
-   ```powershell
-   .\pilot.bat --num-samples 500 --batch-size 128
-   ```
-   *Time: ~1 minute. Verifies learning rate and loss drop.*
-
-4. **Production Fine-Tuning**:
-   ```powershell
-   .\train.bat --epochs 40 --batch-size 384 --workers 16
-   ```
-   *Time: ~15-30 minutes on RTX 5060 (64GB RAM). Saves checkpoints in `outputs/production_run/checkpoints/`.*
-
-5. **Export Best Model**:
-   ```powershell
-   .\export.bat
-   ```
-   *Time: ~10 seconds. Exports best model into `export/kurdish_final/`.*
-
-6. **Test Inference**:
-   ```powershell
-   .\infer.bat --split test --count 10
-   ```
-   *Time: ~3 seconds. Displays predictions vs. expected ground truth.*
-
-7. **Full-Page / Book OCR**:
-   ```powershell
-   .\read.bat -i my_document.pdf -o ./extracted_book
-   ```
-   *Time: ~5-15 seconds per page.*
-
----
-
-## CLI Customization Options
-
-All scripts accept CLI arguments directly to take full advantage of your workstation hardware:
-
-```powershell
-# 1. High-RAM Multi-Core Workstation Training (e.g. 64GB RAM, 32 Cores, RTX 5060):
-.\train.bat --epochs 40 --batch-size 384 --eval-batch-size 256 --workers 16 --lr 0.001
-
-# 2. Ultra-Fast Pilot Convergence Test:
-.\pilot.bat --num-samples 1000 --max-epochs 3 --batch-size 128 --workers 8
-
-# 3. Custom Prediction Image Shape (e.g. Higher width for long Kurdish compound words):
-.\train.bat --image-shape 3,48,480 --max-text-length 48 --batch-size 256
-.\infer.bat --image-shape 3,48,480 --batch-size 64
-
-# 4. Fast Batched Inference on Unseen Test Split:
-.\infer.bat --split test --count 50 --batch-size 64
-
-# 5. Read Multi-Page PDF / High-Res Book with Sharp Detection:
-.\read.bat -i book.pdf -o ./book_output --det-limit-side-len 1600 --batch-size 64 --dpi 300
-
-# 6. Full Automated MLOps Pipeline:
-.\pipeline.bat --epochs 40 --batch-size 384 --workers 16
+# Benchmark specific number of unseen test samples
+python main.py benchmark-unseen --count 500 --batch-size 64
 ```
 
 ---
 
-## Fast Package Management with `uv`
+## 📊 Benchmark Results (Anti-Catastrophic Forgetting)
 
-This repository is optimized for [Astral `uv`](https://github.com/astral-sh/uv), the ultra-fast Python package and project manager:
+The model retains **100% Arabic and English proficiency** while adapting to Kurdish:
 
-- **Built-in to `.venv`**: When you run `setup.bat`, `uv` is installed directly into your virtual environment (`.venv\Scripts\uv.exe`).
-- **Global Installation (Optional)**: To have `uv` accessible globally in any PowerShell terminal, run:
-  ```powershell
-  powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
-  ```
-- **How to Run Commands**:
-  - **With `.venv` active**: `python main.py <command>` or `uv run python main.py <command>`
-  - **Without activating `.venv`**: Double-click `studio.bat` or `infer.bat` (they auto-locate `.venv\Scripts\python.exe`).
-
----
-
-## Multi-Page Documents & Large Book Extraction
-
-The pipeline includes a production-grade **Document & Book Reader** combining PP-OCRv5 DBNet Text Detection, fine-tuned Kurdish SVTR Recognition, and column-aware Right-to-Left (RTL) reading order sorting.
-
-```bash
-# 1. Read an entire PDF book (rendered at 200 or 300 DPI)
-python main.py read --input path/to/kurdish_book.pdf --dpi 200 --output-dir ./extracted_book
-
-# 2. Read a directory of scanned book pages (PNG/JPG)
-python main.py read --input path/to/scanned_pages/ --output-dir ./extracted_book
-
-# 3. Read a single document scan or photo
-python main.py read --input path/to/document_page.jpg --output-dir ./extracted_page
-```
-
-### Generated Book Outputs:
-- `book.md`: Clean Markdown with `# Page N` sections and paragraphs.
-- `book.txt`: Plain text document.
-- `book.json`: Structural data containing per-line text, bounding polygons, confidence scores, column indices, and latencies.
-- `annotated_pages/`: Visualizations highlighting detected Kurdish text bounding boxes.
-
----
-
-## Interactive Web Inference Studio
-
-Launch the zero-dependency browser UI for drag-and-drop testing, clipboard paste, visual bounding box inspection, and real-time latency readouts:
-
-```bash
-# Option A: One-click launcher on Windows
-.\studio.bat
-
-# Option B: CLI command
-python main.py serve
-```
-The studio will automatically open [http://127.0.0.1:8501](http://127.0.0.1:8501) in your browser.
-
----
-
-## Versioned Benchmarking Reports (`reports/benchmarking/v{n}/`)
-
-Every training stage is automatically tracked and structured under `reports/benchmarking/v{n}/`:
-
-```
-reports/benchmarking/v{n}/
-├── leaderboard.md                # Markdown leaderboard comparing Baseline vs Pilot vs All Epochs
-├── summary.json                  # Aggregated JSON metrics across all stages
-├── baseline/
-│   ├── baseline_report.json      # Foundation zero-shot benchmark
-│   └── baseline_report.md
-├── pilot/
-│   ├── pilot_report.json         # Mini-epoch convergence benchmark
-│   ├── pilot_report.md
-│   └── pilot_runtime_config.yml
-└── full/
-    ├── benchmark_report.md       # Checkpoint comparison table
-    ├── benchmark_best_accuracy.json
-    └── benchmark_iter_epoch_*.json
-```
-
----
-
-## Reading Large Books: Is This Model Perfect, or Should You Use PP-Structure?
-
-### 1. What does this model do?
-This model is a **Text Recognizer** (`PP-OCRv5 Recognition / SVTR`). It achieves **>75% exact line accuracy** (and down to ~4-10% CER) after just 5 epochs, compared to 18% for the un-finetuned foundation model.
-
-### 2. Can it read large books?
-**Yes**, when used with `DocumentReader` (`python main.py read --input book.pdf`), it detects text blocks on each page with DBNet, sorts reading order (RTL, column-aware), and recognizes the Kurdish text lines.
-
-### 3. How to make it perfect for production publishing?
-- **More Epochs (15–30)**: Fine-tuning for 20–30 epochs with cosine decay learning rate pushes exact match accuracy from 75% to >90–95%, reducing manual proofreading.
-- **PP-Structure Integration**:
-  For complex books with **multi-column articles, tables, figures, headers/footers, and footnotes**, you can combine this model with **PP-StructureV2**:
-  - **Layout Analysis (PicoDet / LayoutLM)** identifies columns, titles, paragraphs, and tables.
-  - **SLANet** extracts structured HTML tables.
-  - **Your fine-tuned Kurdish recognizer (`export/kurdish_final`)** is plugged directly into PP-Structure as the core text recognition engine!
-  - PP-Structure does not replace this model — it *uses* this model as its Kurdish brain!
-
----
-
-## Base Model Architecture & Multilingual Foundation
-
-### What is `PaddlePaddle/arabic_PP-OCRv5_mobile_rec`?
-The foundation model is PaddleOCR's latest **PP-OCRv5 Mobile Recognition** network optimized for Arabic script and multilingual environments:
-1. **Backbone (PPLCNetV3)**: An ultra-fast, lightweight convolutional network featuring depthwise separable convolutions, squeeze-and-excitation blocks, and large kernel receptive fields tailored for low-latency inference on CPUs, mobile devices, and consumer GPUs.
-2. **Neck (SVTR Encoder)**: Single Visual Model for Text Recognition sequence encoder that models 1D text relations directly from 2D visual feature patches without the high computational overhead of heavy recurrent LSTM networks.
-3. **Head (Multi-Head CTC / NRTR)**: Employs a dual-head loss during training (CTC + NRTR attention) and a streamlined Connectionist Temporal Classification (CTC) head during inference.
-4. **Vocabulary & Output Layer**: Contains **747 character tokens** (mapped to a 749-dimensional output matrix: `[749, 120]`, accounting for CTC blank token 0 and trailing space).
-
-### The Golden Rule: Preserving Arabic & English While Learning Kurdish
-A primary design requirement is that the model **must retain 100% Arabic and English proficiency** while learning Kurdish (**anti-catastrophic forgetting**):
-- **Universal Vocabulary**: The base dictionary (`configs/arabic_kurdish_dict.txt`) already contains:
-  - Standard Classical and Modern Standard Arabic letters, hamzas, tanween, and diacritics (تَشْكِيل).
-  - Complete English Latin alphabet in both uppercase (`A-Z`) and lowercase (`a-z`).
-  - Standard Arabic numerals (`0-9`) and Eastern Arabic-Indic numerals (`٠-٩`).
-  - Kurdish-specific graphemes: `ێ` (Yeh small V), `ۆ` (Oe), `ڕ` (Rreh), `ڵ` (Llah), `ژ` (Jeh), `چ` (Tcheh), `پ` (Peh), `گ` (Gaf), `وو` (double Waw), `ە` (Ae), and ZWNJ.
-- **Continual Weight Preservation**: Because the vocabulary slots and CTC projection shape `[749, 120]` match the pretrained base checkpoint byte-for-byte, we fine-tune existing visual features rather than destroying and re-initializing the classification layer.
-- **Empirical Proof on 1,000 Completely Unseen Test Samples**:
-  Running `python main.py benchmark-unseen --count 1000 --version 1` demonstrates that the model retains superior performance across Arabic and numeric tokens while dramatically elevating Kurdish accuracy:
-
-| Linguistic Category | Unseen Samples | Exact Match Acc (%) | Character Error Rate (CER %) | Mean Confidence (%) |
+| Linguistic Domain | Test Samples | Exact Match Acc (%) | Character Error Rate (CER) | Mean Confidence |
 | :--- | :---: | :---: | :---: | :---: |
 | **OVERALL** | **1,000** | **89.20%** | **8.13%** | **93.32%** |
 | **Kurdish (Sorani/Kurmanji)** | 357 | **88.80%** | **8.55%** | **95.25%** |
@@ -446,49 +205,19 @@ A primary design requirement is that the model **must retain 100% Arabic and Eng
 
 ---
 
-## Text Detection Layer (PP-OCRv5 DBNet)
+## ❓ Frequently Asked Questions
 
-Full-page document and book OCR requires accurate text box localization before recognition:
-- **Model**: PP-OCRv5 Mobile Detection (`assets/base_det_inference/`), based on Differentiable Binarization (`DBNet`).
-- **Function**: Automatically localizes curved, horizontal, vertical, and dense text lines in scanned pages, PDF documents, or book photos.
-- **RTL Reading Order Pipeline (`DocumentReader`)**:
-  1. Detects text bounding polygons with sub-pixel contour un-clipping.
-  2. Identifies multi-column page layouts (e.g. 2-column books) using horizontal histogram valley analysis.
-  3. Sorts columns in **RTL order** (Right column read first, then Left column).
-  4. Clusters lines top-to-bottom within each column.
-  5. Sorts text tokens within each line from Right-to-Left (decreasing x-coordinates).
-  6. Feeds cropped text strips into the fine-tuned Kurdish recognizer with dynamic padding.
+- **Do I need to activate `.venv` manually?**  
+  No. All `.bat` runners (`pipeline.bat`, `train.bat`, `read.bat`, `studio.bat`, etc.) automatically locate and run inside `.venv\Scripts\python.exe`.
+- **How is my system RAM protected?**  
+  The hardware configurator enforces a default **15.0 GB free RAM guard**. It budgets worker processes and batch buffers so your computer never freezes or runs out of memory.
+- **Can I run inference directly in Python?**  
+  Yes:
+  ```python
+  from pathlib import Path
+  from scripts.lib.recognizer import Recognizer
 
----
-
-## Pushing & Updating This Repository
-
-This repository (`qai-paddle-ocr-finetuning-main`) is the single canonical repository. To stage, commit, and push all updates to GitHub:
-
-```bash
-# 1. Check status
-git status
-
-# 2. Stage updated code, documentation, and benchmark reports
-git add .
-
-# 3. Commit changes
-git commit -m "feat: complete production MLOps pipeline, unseen benchmark suite, and document reader"
-
-# 4. Push to main branch
-git push origin main
-```
-
----
-
-## Common Questions & Troubleshooting
-
-- **PowerShell error `running scripts is disabled` on Windows?**
-  Run `setup.bat` instead. It automatically bypasses execution restrictions.
-- **cuDNN warning `installed Paddle is compiled with CUDNN 9.9, but CUDNN version in your machine is 9.5`?**
-  This warning is cosmetic and expected from PaddlePaddle 3.3.1. Training and inference run 100% correctly.
-- **GPU Out-Of-Memory (OOM)?**
-  The script automatically picks a safe batch size for your VRAM. If you want to force a smaller batch size, simply add `--batch-size 32`:
-  ```bash
-  python main.py train --batch-size 32
+  recognizer = Recognizer(model_dir=Path("export/kurdish_final"), use_gpu=True)
+  predictions, timing = recognizer.predict_paths([Path("kurdish_image.jpg")])
+  print(predictions[0].text, predictions[0].score)
   ```
