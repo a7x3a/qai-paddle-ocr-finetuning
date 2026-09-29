@@ -45,26 +45,74 @@ except ImportError:
         HAS_PYMUPDF = False
 
 
+def detect_script_and_direction(text: str) -> tuple[str, str]:
+    """Auto-detect language script and reading direction from text content.
+    Returns (script_name, direction), where:
+      script_name in ["kurdish", "arabic", "english", "numeric", "mixed"]
+      direction in ["rtl", "ltr"]
+    """
+    if not text:
+        return "kurdish", "rtl"
+
+    kurdish_specific = set("ێۆڵڕژڤچپگکە")
+    ar_count = 0
+    ku_count = 0
+    en_count = 0
+    num_count = 0
+
+    for ch in text:
+        if ch in kurdish_specific:
+            ku_count += 1
+            ar_count += 1
+        elif ("\u0600" <= ch <= "\u06ff") or ("\u0750" <= ch <= "\u077f") or ("\u08a0" <= ch <= "\u08ff") or ("\ufb50" <= ch <= "\ufeff"):
+            ar_count += 1
+        elif ("a" <= ch <= "z") or ("A" <= ch <= "Z"):
+            en_count += 1
+        elif ch.isdigit() or ("\u0660" <= ch <= "\u0669") or ("\u06f0" <= ch <= "\u06f9"):
+            num_count += 1
+
+    total_alpha = ar_count + en_count
+    if total_alpha == 0:
+        if num_count > 0:
+            return "numeric", "ltr"
+        return "kurdish", "rtl"
+
+    if ar_count > 0 and en_count > 0:
+        direction = "rtl" if ar_count >= en_count else "ltr"
+        return "mixed", direction
+
+    if ar_count > 0:
+        script = "kurdish" if ku_count > 0 else "arabic"
+        return script, "rtl"
+
+    return "english", "ltr"
+
+
 @dataclass
 class TextLine:
-    """Represents a recognized text segment with its spatial bounding box."""
+    """Represents a recognized text line with its spatial bounding box and linguistic properties."""
     text: str
     score: float
     box: list[list[float]]  # 4 corner points [[x1, y1], [x2, y2], [x3, y3], [x4, y4]]
     line_number: int
     column_index: int = 0
+    script: str = "kurdish"  # "kurdish", "arabic", "english", "numeric", "mixed"
+    direction: str = "rtl"   # "rtl", "ltr"
+    word_count: int = 1
 
 
 @dataclass
 class LayoutBlock:
-    """Represents a high-level semantic layout region (Header, Paragraph, Table, Column, etc.)."""
+    """Represents a high-level semantic layout region (Title, Header, Paragraph, Table, Footer)."""
     block_id: int
-    block_type: str  # "title", "header", "paragraph", "table", "caption"
+    block_type: str  # "title", "header", "paragraph", "table", "footer", "caption"
     column_index: int
     bbox: list[float]  # [x_min, y_min, x_max, y_max]
     lines: list[TextLine]
     text: str
     confidence: float
+    script: str = "kurdish"
+    direction: str = "rtl"
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -74,6 +122,8 @@ class LayoutBlock:
             "bbox": [round(float(c), 1) for c in self.bbox],
             "text": self.text,
             "confidence": round(float(self.confidence), 4),
+            "script": self.script,
+            "direction": self.direction,
             "line_count": len(self.lines),
             "lines": [asdict(l) for l in self.lines],
         }
@@ -272,53 +322,137 @@ class DocumentReader:
         return [(0, boxes)]
 
     @classmethod
-    def _sort_boxes_rtl(cls, dt_boxes: list[np.ndarray], img_width: int = 1000) -> list[tuple[np.ndarray, int]]:
-        """Sort detected bounding boxes in natural Kurdish/Arabic reading order:
-        Column-aware (Right column first, then Left column), Top-to-bottom, and Right-to-Left within each line.
+    def _reconstruct_lines(
+        cls,
+        recognized_boxes: list[dict[str, Any]],
+        img_w: int,
+        img_h: int,
+    ) -> list[TextLine]:
+        """Cluster word-level detection boxes into unified horizontal lines with natural reading order,
+        proper inter-word spacing, and language/script auto-detection.
         """
-        if len(dt_boxes) <= 1:
-            return [(b, 0) for b in dt_boxes]
+        if not recognized_boxes:
+            return []
 
-        columns = cls._detect_columns(dt_boxes, img_width)
-        final_ordered: list[tuple[np.ndarray, int]] = []
+        # Step 1: Detect full-width headers/titles spanning across the top (or center)
+        full_width_boxes = []
+        body_boxes = []
 
-        for col_idx, col_boxes in columns:
-            boxes = list(col_boxes)
-            boxes.sort(key=lambda b: (b[:, 1].min(), -b[:, 0].max()))
+        for b in recognized_boxes:
+            box_w = float(b["box"][:, 0].max() - b["box"][:, 0].min())
+            center_y = float((b["box"][:, 1].min() + b["box"][:, 1].max()) / 2.0)
+            if box_w >= img_w * 0.52 and center_y < img_h * 0.40:
+                full_width_boxes.append(b)
+            else:
+                body_boxes.append(b)
 
-            lines: list[list[np.ndarray]] = []
-            for box in boxes:
-                box_top = float(box[:, 1].min())
-                box_bottom = float(box[:, 1].max())
-                box_height = max(1.0, box_bottom - box_top)
+        # Step 2: Detect columns in the body boxes (e.g. 2 columns)
+        column_groups = cls._detect_columns([b["box"] for b in body_boxes], img_w) if body_boxes else [(0, [])]
 
-                placed = False
-                for line in lines:
-                    line_tops = [b[:, 1].min() for b in line]
-                    line_bottoms = [b[:, 1].max() for b in line]
-                    line_avg_top = sum(line_tops) / len(line_tops)
-                    line_avg_bottom = sum(line_bottoms) / len(line_bottoms)
-                    line_avg_height = max(1.0, line_avg_bottom - line_avg_top)
+        # Determine dominant script across the document to set column order (RTL vs LTR)
+        doc_sample_text = " ".join(b["text"] for b in recognized_boxes[:30])
+        doc_script, doc_dir = detect_script_and_direction(doc_sample_text)
 
-                    v_center = (box_top + box_bottom) / 2.0
-                    if line_avg_top - (line_avg_height * 0.35) <= v_center <= line_avg_bottom + (line_avg_height * 0.35):
-                        line.append(box)
-                        placed = True
+        segments: list[list[dict[str, Any]]] = []
+        if full_width_boxes:
+            segments.append(full_width_boxes)
+
+        if len(column_groups) > 1:
+            col_map = {idx: [] for idx, _ in column_groups}
+            for b in body_boxes:
+                assigned_col = 0
+                for c_idx, c_boxes in column_groups:
+                    if any(np.array_equal(b["box"], cb) for cb in c_boxes):
+                        assigned_col = c_idx
+                        break
+                col_map[assigned_col].append(b)
+
+            if doc_dir == "rtl":
+                # In RTL: Right column (col 0) first, then Left column (col 1)
+                for c_idx in sorted(col_map.keys()):
+                    if col_map[c_idx]:
+                        segments.append(col_map[c_idx])
+            else:
+                # In LTR: Left column first, then Right column
+                for c_idx in sorted(col_map.keys(), reverse=True):
+                    if col_map[c_idx]:
+                        segments.append(col_map[c_idx])
+        elif body_boxes:
+            segments.append(body_boxes)
+
+        # Step 3: Within each segment, cluster boxes into horizontal lines
+        ordered_lines: list[TextLine] = []
+        line_counter = 1
+
+        for seg_idx, seg_boxes in enumerate(segments):
+            seg_boxes.sort(key=lambda b: (b["box"][:, 1].min(), b["box"][:, 0].min()))
+
+            line_clusters: list[list[dict[str, Any]]] = []
+            for b in seg_boxes:
+                b_top = float(b["box"][:, 1].min())
+                b_bottom = float(b["box"][:, 1].max())
+                b_height = max(1.0, b_bottom - b_top)
+                b_center_y = (b_top + b_bottom) / 2.0
+
+                matched_line = None
+                for line in line_clusters:
+                    l_tops = [float(item["box"][:, 1].min()) for item in line]
+                    l_bottoms = [float(item["box"][:, 1].max()) for item in line]
+                    l_avg_top = sum(l_tops) / len(l_tops)
+                    l_avg_bottom = sum(l_bottoms) / len(l_bottoms)
+                    l_avg_h = max(1.0, l_avg_bottom - l_avg_top)
+                    l_center_y = (l_avg_top + l_avg_bottom) / 2.0
+
+                    overlap = max(0.0, min(b_bottom, l_avg_bottom) - max(b_top, l_avg_top))
+                    if overlap / min(b_height, l_avg_h) >= 0.38 or abs(b_center_y - l_center_y) <= (l_avg_h * 0.45):
+                        matched_line = line
                         break
 
-                if not placed:
-                    lines.append([box])
+                if matched_line is not None:
+                    matched_line.append(b)
+                else:
+                    line_clusters.append([b])
 
-            # Sort lines top-to-bottom
-            lines.sort(key=lambda l: min(b[:, 1].min() for b in l))
+            # Sort lines strictly top to bottom
+            line_clusters.sort(key=lambda lc: min(float(item["box"][:, 1].min()) for item in lc))
 
-            # Within each line, sort Kurdish/Arabic text RIGHT to LEFT (largest x_max first)
-            for line in lines:
-                line.sort(key=lambda b: -b[:, 0].max())
-                for b in line:
-                    final_ordered.append((b, col_idx))
+            # Within each line, order boxes according to detected script and JOIN WITH PROPER SPACES
+            for lc in line_clusters:
+                raw_combined = " ".join(item["text"] for item in lc)
+                script_name, line_dir = detect_script_and_direction(raw_combined)
 
-        return final_ordered
+                if line_dir == "rtl":
+                    # In RTL Kurdish/Arabic: Order from Right to Left (largest x max first)
+                    lc.sort(key=lambda item: -item["box"][:, 0].max())
+                else:
+                    # In LTR English/Latin: Order from Left to Right (smallest x min first)
+                    lc.sort(key=lambda item: item["box"][:, 0].min())
+
+                # Reconstruct full line text with proper single spacing!
+                reconstructed_text = " ".join(item["text"].strip() for item in lc if item["text"].strip())
+                if not reconstructed_text:
+                    continue
+
+                all_pts = np.vstack([item["box"] for item in lc])
+                x_min, y_min = float(all_pts[:, 0].min()), float(all_pts[:, 1].min())
+                x_max, y_max = float(all_pts[:, 0].max()), float(all_pts[:, 1].max())
+                unified_box = [[x_min, y_min], [x_max, y_min], [x_max, y_max], [x_min, y_max]]
+
+                avg_conf = float(np.mean([item["score"] for item in lc]))
+
+                ordered_lines.append(TextLine(
+                    text=reconstructed_text,
+                    score=round(avg_conf, 4),
+                    box=unified_box,
+                    line_number=line_counter,
+                    column_index=seg_idx,
+                    script=script_name,
+                    direction=line_dir,
+                    word_count=len(lc),
+                ))
+                line_counter += 1
+
+        return ordered_lines
 
     @classmethod
     def _analyze_document_layout(
@@ -387,6 +521,8 @@ class DocumentReader:
                 block_text = "\n".join(l.text for l in current_block_lines)
 
             avg_conf = float(np.mean([l.score for l in current_block_lines]))
+            b_script, b_dir = detect_script_and_direction(block_text)
+
             blocks.append(LayoutBlock(
                 block_id=len(blocks) + 1,
                 block_type=current_block_type,
@@ -395,6 +531,8 @@ class DocumentReader:
                 lines=list(current_block_lines),
                 text=block_text,
                 confidence=avg_conf,
+                script=b_script,
+                direction=b_dir,
             ))
             current_block_lines = []
 
@@ -407,7 +545,7 @@ class DocumentReader:
             is_col_change = (l.column_index != current_col)
 
             # Heuristics for semantic layout categorization
-            is_footer = (line_ymin > img_h * 0.90 and len(l.text.split()) <= 4)
+            is_footer = (line_ymin > img_h * 0.90 and len(l.text.split()) <= 6)
             is_title = (line_h >= median_h * 1.45 or (i == 0 and line_h >= median_h * 1.25 and line_w > img_w * 0.4))
             is_header = (not is_title and (line_h >= median_h * 1.18 or (line_w < (img_w / max(1, col_count)) * 0.55 and len(l.text.split()) <= 6 and i > 0 and (line_ymin - line_metrics[i-1]["y_max"]) > median_gap * 1.5)))
 
@@ -458,7 +596,7 @@ class DocumentReader:
 
         flush_block()
 
-        # Build Markdown text representation
+        # Build clean Markdown text representation
         md_parts: list[str] = []
         for b in blocks:
             if b.block_type == "title":
@@ -522,16 +660,17 @@ class DocumentReader:
 
             cv2.rectangle(canvas, (x1, y1), (x2, y2), color, 2)
 
+            script_tag = "KU" if b.script == "kurdish" else ("EN" if b.script == "english" else ("AR" if b.script == "arabic" else "NUM"))
             if b.block_type == "title":
-                badge_str = f"H1 TITLE #{b.block_id}"
+                badge_str = f"H1 TITLE [{script_tag}] #{b.block_id}"
             elif b.block_type == "header":
-                badge_str = f"H2 HEADER #{b.block_id}"
+                badge_str = f"H2 HEADER [{script_tag}] #{b.block_id}"
             elif b.block_type == "table":
-                badge_str = f"TABLE #{b.block_id} ({len(b.lines)} cells)"
+                badge_str = f"TABLE #{b.block_id} ({len(b.lines)} rows)"
             elif b.block_type == "footer":
                 badge_str = f"FOOTER #{b.block_id}"
             else:
-                badge_str = f"P #{b.block_id} ({len(b.lines)} lines)"
+                badge_str = f"P #{b.block_id} [{script_tag}] ({len(b.lines)} lines)"
 
             font_scale = 0.42
             font_thick = 1
@@ -567,20 +706,35 @@ class DocumentReader:
         img: np.ndarray,
         lines: list[TextLine],
     ) -> np.ndarray:
-        """Render precise line-level detection polygons and sequence IDs."""
+        """Render precise line-level detection polygons, sequence IDs, and directional cues."""
         canvas = img.copy()
         for line in lines:
             pts = np.array(line.box, dtype=np.int32).reshape((-1, 1, 2))
-            col_idx = line.column_index
-            box_color = (212, 182, 6) if col_idx == 0 else (6, 212, 182)
+            # Color based on script
+            if line.script == "kurdish":
+                box_color = (212, 182, 6)    # Cyan
+            elif line.script == "english":
+                box_color = (20, 140, 240)    # Amber
+            elif line.script == "arabic":
+                box_color = (180, 50, 180)   # Violet
+            else:
+                box_color = (60, 180, 75)    # Emerald
+
             cv2.polylines(canvas, [pts], isClosed=True, color=box_color, thickness=2)
 
             xs = [p[0] for p in line.box]
             ys = [p[1] for p in line.box]
-            badge_x = int(max(xs))
-            badge_y = int(min(ys))
 
-            cv2.circle(canvas, (badge_x, badge_y), 9, (6, 182, 212), -1)
+            # Badge placed on the side where reading begins:
+            # Right side for RTL, Left side for LTR
+            if line.direction == "rtl":
+                badge_x = int(max(xs))
+                badge_y = int(min(ys))
+            else:
+                badge_x = int(min(xs))
+                badge_y = int(min(ys))
+
+            cv2.circle(canvas, (badge_x, badge_y), 9, box_color, -1)
             num_str = str(line.line_number)
             cv2.putText(
                 canvas,
@@ -601,7 +755,7 @@ class DocumentReader:
         annotate: bool = True,
         page_number: int = 1,
     ) -> DocumentResult:
-        """Run detection and recognition on an entire document image page."""
+        """Run detection, smart line reconstruction with language auto-detection and proper spacing, and semantic layout analysis."""
         if isinstance(image_input, (str, Path)):
             img_p = Path(image_input).resolve()
             if not img_p.is_file():
@@ -638,11 +792,14 @@ class DocumentReader:
                 total_ms = (time.perf_counter() - t_start) * 1000.0
 
                 if preds and preds[0].text.strip() and float(preds[0].score) >= min_score:
+                    c_script, c_dir = detect_script_and_direction(preds[0].text.strip())
                     line = TextLine(
                         text=preds[0].text.strip(),
                         score=round(float(preds[0].score), 4),
                         box=[[0, 0], [img_w, 0], [img_w, img_h], [0, img_h]],
                         line_number=1,
+                        script=c_script,
+                        direction=c_dir,
                     )
                     block = LayoutBlock(
                         block_id=1,
@@ -652,6 +809,8 @@ class DocumentReader:
                         lines=[line],
                         text=line.text,
                         confidence=line.score,
+                        script=c_script,
+                        direction=c_dir,
                     )
                     return DocumentResult(
                         full_text=line.text,
@@ -678,18 +837,13 @@ class DocumentReader:
                 page_number=page_number,
             )
 
-        # Step 2: RTL Reading Order & Column-Aware Sorting
-        sorted_pairs = self._sort_boxes_rtl(dt_boxes, img_width=img_w)
-        sorted_boxes = [p[0] for p in sorted_pairs]
-        col_indices = [p[1] for p in sorted_pairs]
-
-        # Step 3: Perspective Crop of each text box
+        # Step 2: Perspective Crop of all detected bounding boxes
         crops: list[np.ndarray] = []
-        for box in sorted_boxes:
+        for box in dt_boxes:
             crop = get_rotate_crop_image(img, box)
             crops.append(crop)
 
-        # Step 4: Batch Recognition
+        # Step 3: Batch Recognition
         t_rec_0 = time.perf_counter()
         temp_paths: list[Path] = []
         temp_files = []
@@ -711,31 +865,27 @@ class DocumentReader:
 
         rec_ms = (time.perf_counter() - t_rec_0) * 1000.0
 
-        # Step 5: Assemble recognized lines
-        lines: list[TextLine] = []
-        line_texts: list[str] = []
-        line_counter = 1
-
-        for i, (box, col_idx, p) in enumerate(zip(sorted_boxes, col_indices, preds)):
-            score = float(p.score)
+        # Step 4: Filter valid recognized boxes
+        recognized_boxes: list[dict[str, Any]] = []
+        for box, p in zip(dt_boxes, preds):
             text = p.text.strip()
+            score = float(p.score)
             if not text or score < min_score:
                 continue
+            recognized_boxes.append({
+                "box": box,
+                "text": text,
+                "score": score,
+            })
 
-            lines.append(TextLine(
-                text=text,
-                score=round(score, 4),
-                box=box.tolist(),
-                line_number=line_counter,
-                column_index=col_idx,
-            ))
-            line_texts.append(text)
-            line_counter += 1
+        # Step 5: Smart Line Reconstruction (Proper Inter-Word Spacing, Auto-Script Detection & Natural Reading Order)
+        lines = self._reconstruct_lines(recognized_boxes, img_w=img_w, img_h=img_h)
 
-        full_text = "\n".join(line_texts)
-
-        # Step 6: Semantic Layout Analysis
+        # Step 6: Semantic Layout Analysis (Blocks, Titles, Paragraphs, Tables, Columns)
         blocks, col_count, markdown_text = self._analyze_document_layout(lines, img_w=img_w, img_h=img_h)
+
+        # Full Text with genuine lines and proper spaces
+        full_text = "\n".join(l.text for l in lines)
 
         # Step 7: Annotations
         annotated_line = self._draw_line_annotations(img, lines) if annotate else None

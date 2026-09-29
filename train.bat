@@ -7,7 +7,7 @@ echo  Starting Kurdish PaddleOCR Production Fine-Tuning
 echo ==============================================================================
 
 if "%~1"=="" (
-    set TRAIN_ARGS=--epochs 40
+    set TRAIN_ARGS=--epochs 10
 ) else (
     set TRAIN_ARGS=%*
 )

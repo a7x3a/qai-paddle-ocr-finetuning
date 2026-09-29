@@ -8,7 +8,7 @@ echo  (Smoke -^> Baseline -^> Pilot -^> Train -^> Benchmark -^> Export)
 echo ==============================================================================
 
 if "%~1"=="" (
-    set PIPE_ARGS=--epochs 40
+    set PIPE_ARGS=--epochs 10
 ) else (
     set PIPE_ARGS=%*
 )

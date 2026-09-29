@@ -97,7 +97,7 @@ All runners automatically use the local virtual environment (`.venv`):
 | **`setup.bat`** | `python main.py setup` | Installs dependencies, Paddle-GPU, clones PaddleOCR, downloads dataset | ~2–5 min | `.venv/`, `data/` |
 | **`smoke.bat`** | `python main.py smoke-test` | Fast 5-second pre-flight test verifying GPU, VRAM, and gradient pass | ~10 sec | Terminal |
 | **`pipeline.bat`** | `python main.py pipeline` | **Automated 7-Stage Pipeline**: Smoke → Baseline → Pilot → Train → Benchmark → Export → Unseen | ~18–30 min | `benchmarks/v{n}/`<br>`outputs/v{n}/`<br>`export/v{n}/` |
-| **`train.bat`** | `python main.py train` | Full production fine-tuning on entire dataset (40 epochs) with auto-checkpoints | ~15–25 min | `outputs/v{n}/production_run/` |
+| **`train.bat`** | `python main.py train` | Full production fine-tuning on entire dataset (10 epochs) with auto-checkpoints | ~10–18 min | `outputs/v{n}/production_run/` |
 | **`pilot.bat`** | `python main.py pilot-run` | Mini convergence check (500 samples, 2 mini-epochs) | ~1 min | `outputs/v{n}/pilot/` |
 | **`export.bat`** | `python main.py export` | Exports best trained checkpoint to deployable PIR inference format | ~5 sec | `export/kurdish_final/` |
 | **`infer.bat`** | `python main.py infer` | Runs text recognition on test images with ground-truth comparison table | ~3 sec | Terminal Table |
@@ -111,14 +111,14 @@ All runners automatically use the local virtual environment (`.venv`):
 To execute the entire MLOps workflow unattended:
 
 ```powershell
-.\pipeline.bat --epochs 40
+.\pipeline.bat --epochs 10
 ```
 
 ### The 7 Automated Stages:
 1. **Pre-Flight Smoke Test**: Checks CUDA compute capability and gradient pass.
 2. **Baseline Benchmark**: Evaluates un-finetuned foundation model zero-shot (~18% accuracy).
 3. **Pilot Convergence Check**: Rapid 2-epoch mini-run to verify loss decrease.
-4. **Full Production Training**: Trains 40 epochs on 162k Kurdish samples with AMP O2 and pinned memory.
+4. **Full Production Training**: Trains 10 epochs on 162k Kurdish samples with AMP O2 and pinned memory.
 5. **Checkpoint Benchmarking**: Auto-evaluates all saved checkpoints to find the peak accuracy model.
 6. **Deployable Model Export**: Converts best weights into PIR inference format.
 7. **Unseen Multilingual Generalization**: Tests against unseen Kurdish, Arabic, and numeric test sets.
@@ -171,7 +171,7 @@ You can train completely free in Google Colab:
 !git clone https://github.com/a7x3a/qai-paddle-ocr-finetuning.git
 %cd qai-paddle-ocr-finetuning
 !bash scripts/setup.sh
-!python main.py pipeline --epochs 40 --no-interactive
+!python main.py pipeline --epochs 10 --no-interactive
 ```
 
 ---

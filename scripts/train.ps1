@@ -12,7 +12,7 @@
       smoke  1 epoch over a 2,000-sample slice in FP32. Proves the whole loop works.
       pilot  8 epochs over the full training set with AMP. Measures real throughput and
              gives an early read on whether fine-tuning beats the base model.
-      full   40 epochs over the full training set with AMP.
+      full   10 epochs over the full training set with AMP.
 
 .EXAMPLE
     .\scripts\train.ps1 -Phase smoke
@@ -67,7 +67,7 @@ switch ($Phase) {
         if ($Epochs -le 0) { $Epochs = 8 }
     }
     'full' {
-        if ($Epochs -le 0) { $Epochs = 40 }
+        if ($Epochs -le 0) { $Epochs = 10 }
     }
 }
 

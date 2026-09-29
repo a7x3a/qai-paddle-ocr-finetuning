@@ -762,6 +762,19 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     }, { passive: false });
 
     // Render Formatted Reader
+    function getScriptBadge(script) {
+      if (script === 'KU') {
+        return `<span class="text-[9px] px-1.5 py-0.5 rounded font-mono font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">KU</span>`;
+      } else if (script === 'EN') {
+        return `<span class="text-[9px] px-1.5 py-0.5 rounded font-mono font-bold bg-blue-500/20 text-blue-300 border border-blue-500/30">EN</span>`;
+      } else if (script === 'AR') {
+        return `<span class="text-[9px] px-1.5 py-0.5 rounded font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">AR</span>`;
+      } else if (script === 'NUM') {
+        return `<span class="text-[9px] px-1.5 py-0.5 rounded font-mono font-bold bg-purple-500/20 text-purple-300 border border-purple-500/30">NUM</span>`;
+      }
+      return `<span class="text-[9px] px-1.5 py-0.5 rounded font-mono font-bold bg-slate-700 text-slate-300">${script || 'AUTO'}</span>`;
+    }
+
     function renderFormattedReader(blocks, lines) {
       formattedFlow.innerHTML = '';
       if (!blocks.length && !lines.length) {
@@ -788,7 +801,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             textClass = "text-lg sm:text-xl font-bold text-sky-100 leading-snug";
           } else if (b.block_type === 'table') {
             card.classList.add('bg-amber-950/20', 'border-amber-800/40', 'hover:border-amber-500');
-            typeBadge = `<span class="text-[10px] px-2 py-0.5 rounded bg-amber-900/60 text-amber-300 font-mono font-semibold">TABLE (${b.lines.length} items)</span>`;
+            typeBadge = `<span class="text-[10px] px-2 py-0.5 rounded bg-amber-900/60 text-amber-300 font-mono font-semibold">TABLE</span>`;
             textClass = "text-sm sm:text-base font-medium text-amber-100 leading-relaxed font-mono";
           } else if (b.block_type === 'footer') {
             card.classList.add('bg-slate-900/40', 'border-slate-800', 'hover:border-slate-600');
@@ -800,24 +813,74 @@ HTML_TEMPLATE = """<!DOCTYPE html>
             textClass = "text-base sm:text-lg font-medium text-slate-100 leading-loose";
           }
 
+          const dir = b.direction || (b.script === 'EN' ? 'ltr' : 'rtl');
+          const alignClass = dir === 'ltr' ? 'text-left' : 'text-right';
+          const fontClass = b.script === 'EN' ? 'font-sans' : 'kurdish-font';
+
+          // Table custom visual rendering
+          let contentHtml = '';
+          if (b.block_type === 'table' && b.text.includes('|')) {
+            const linesList = b.text.split('\n').filter(r => r.trim().startsWith('|'));
+            if (linesList.length > 0) {
+              let tbl = '<div class="overflow-x-auto my-1"><table class="w-full text-xs sm:text-sm border-collapse ' + alignClass + '">';
+              linesList.forEach((rowStr, idx) => {
+                const cells = rowStr.split('|').map(c => c.trim()).filter(c => c !== '');
+                if (idx === 0) {
+                  tbl += '<thead class="bg-amber-900/30 text-amber-300 border-b border-amber-800/40"><tr>' + cells.map(c => `<th class="p-2.5 font-semibold ${alignClass}">${c}</th>`).join('') + '</tr></thead><tbody>';
+                } else {
+                  tbl += `<tr class="border-b border-white/5 hover:bg-white/5 transition">${cells.map(c => `<td class="p-2.5">${c}</td>`).join('')}</tr>`;
+                }
+              });
+              tbl += '</tbody></table></div>';
+              contentHtml = tbl;
+            } else {
+              contentHtml = b.text.replace(/\n/g, '<br>');
+            }
+          } else {
+            contentHtml = b.text.replace(/\n/g, '<br>');
+          }
+
           card.innerHTML = `
             <div class="flex items-center justify-between pb-2 mb-2 border-b border-white/5 font-sans">
               <div class="flex items-center gap-2">
                 ${typeBadge}
-                <span class="text-[10px] text-slate-500 font-mono">Col ${b.column_index + 1} &bull; ${(b.confidence * 100).toFixed(1)}%</span>
+                ${getScriptBadge(b.script)}
+                <span class="text-[10px] text-slate-500 font-mono">Col ${(b.column_index || 0) + 1} &bull; ${(b.confidence * 100).toFixed(1)}%</span>
+              </div>
+              <div class="flex items-center gap-2">
+                <span class="text-[10px] font-mono text-slate-500 uppercase">${dir}</span>
+                <button onclick="navigator.clipboard.writeText(this.getAttribute('data-copy'))" data-copy="${encodeURIComponent(b.text)}" title="Copy block" class="opacity-0 group-hover:opacity-100 text-slate-400 hover:text-cyan-400 transition text-[11px] px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700">Copy</button>
               </div>
             </div>
-            <div class="${textClass}" style="font-size: ${state.fontSizePx}px;">
-              ${b.text.replace(/\\n/g, '<br>')}
+            <div class="${textClass} ${fontClass} ${alignClass}" dir="${dir}" style="font-size: ${state.fontSizePx}px;">
+              ${contentHtml}
             </div>
           `;
+          // Wire up the copy button decoding
+          const copyBtn = card.querySelector('button[data-copy]');
+          if (copyBtn) {
+            const rawCopy = decodeURIComponent(copyBtn.getAttribute('data-copy'));
+            copyBtn.onclick = (e) => {
+              e.stopPropagation();
+              navigator.clipboard.writeText(rawCopy).then(() => {
+                copyBtn.textContent = 'Copied!';
+                setTimeout(() => copyBtn.textContent = 'Copy', 1200);
+              });
+            };
+          }
+
           formattedFlow.appendChild(card);
         });
       } else {
         // Fallback: render individual lines
         lines.forEach(l => {
+          const dir = l.direction || (l.script === 'EN' ? 'ltr' : 'rtl');
+          const fontClass = l.script === 'EN' ? 'font-sans' : 'kurdish-font';
+          const alignClass = dir === 'ltr' ? 'text-left' : 'text-right';
+
           const div = document.createElement('div');
-          div.className = "p-2 rounded bg-slate-900/60 border border-slate-800 text-base text-slate-100";
+          div.className = `p-2.5 rounded bg-slate-900/60 border border-slate-800 text-base text-slate-100 ${fontClass} ${alignClass}`;
+          div.dir = dir;
           div.textContent = l.text;
           formattedFlow.appendChild(div);
         });
@@ -838,15 +901,19 @@ HTML_TEMPLATE = """<!DOCTYPE html>
         row.className = "flex items-center justify-between p-2.5 rounded-xl bg-slate-950 border border-slate-800 hover:border-cyan-500/50 transition cursor-pointer text-xs";
         const scorePct = (l.score * 100).toFixed(1);
         const scoreColor = l.score >= 0.8 ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/20' : 'text-amber-400 bg-amber-500/10 border-amber-500/20';
+        const dir = l.direction || (l.script === 'EN' ? 'ltr' : 'rtl');
+        const fontClass = l.script === 'EN' ? 'font-sans' : 'kurdish-font';
 
         row.innerHTML = `
           <div class="flex items-center gap-2 overflow-hidden pr-2">
             <span class="w-6 h-6 rounded-full bg-slate-900 border border-slate-800 text-cyan-400 flex items-center justify-center font-mono text-[10px] font-bold flex-shrink-0">
               ${l.line_number}
             </span>
-            <span class="kurdish-font text-base font-semibold text-slate-100 truncate">${l.text}</span>
+            ${getScriptBadge(l.script)}
+            <span class="${fontClass} text-base font-semibold text-slate-100 truncate" dir="${dir}">${l.text}</span>
           </div>
           <div class="flex items-center gap-2 flex-shrink-0 font-mono text-[11px]">
+            <span class="text-slate-500 text-[10px]">${l.word_count || 1}w</span>
             <span class="text-slate-500 text-[10px]">C${(l.column_index || 0) + 1}</span>
             <span class="px-2 py-0.5 rounded-full border ${scoreColor} font-semibold">${scorePct}%</span>
           </div>
@@ -1189,6 +1256,9 @@ class InferenceRequestHandler(BaseHTTPRequestHandler):
                         "line_number": line.line_number,
                         "column_index": line.column_index,
                         "box": line.box,
+                        "script": line.script,
+                        "direction": line.direction,
+                        "word_count": line.word_count,
                     }
                     for line in doc_result.lines
                 ],

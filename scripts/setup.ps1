@@ -334,7 +334,7 @@ Write-Host '    python main.py serve                                # Launch int
 Write-Host '    python main.py smoke-test                           # Verify GPU, VRAM & gradient pass' -ForegroundColor White
 Write-Host '    python main.py benchmark-base --max-samples 100     # Zero-shot baseline benchmark' -ForegroundColor White
 Write-Host '    python main.py pilot-run --num-samples 500          # Rapid 2-epoch mini convergence test' -ForegroundColor White
-Write-Host '    python main.py train --epochs 40                    # Full production fine-tuning' -ForegroundColor White
+Write-Host '    python main.py train --epochs 10                    # Full production fine-tuning' -ForegroundColor White
 Write-Host '    python main.py export                               # Export trained model for deployment' -ForegroundColor White
 Write-Host '    python main.py infer --split test --count 5         # Run inference on test samples' -ForegroundColor White
 Write-Host ''

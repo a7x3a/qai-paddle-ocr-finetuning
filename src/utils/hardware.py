@@ -50,21 +50,23 @@ class ResourcePreset:
     is_recommended: bool = False
 
 
-def estimate_training_memory(batch_size: int, workers: int, free_ram_gb: float) -> tuple[float, float]:
-    """Estimate host RAM footprint and projected free RAM during PaddleOCR training.
+def estimate_training_memory(batch_size: int, workers: int, free_ram_gb: float, usable_ram_gb: float = 0.0) -> tuple[float, float]:
+    """Estimate host RAM allocated for training and projected free RAM.
 
     Args:
         batch_size: Training batch size per card.
         workers: DataLoader worker process count.
         free_ram_gb: Current available free host RAM.
+        usable_ram_gb: Total budget of RAM usable for training above the OS guard.
 
     Returns:
-        tuple of (estimated_training_ram_gb, projected_free_ram_gb)
+        tuple of (allocated_training_ram_gb, projected_free_ram_gb)
     """
-    # Base Python process, CUDA runtime buffers, Paddle OCR graph, and dataset index: ~2.5 GB
-    # Each DataLoader worker process with sample decoding queue: ~350 MB (0.35 GB)
-    # Batch buffer queue memory: ~4 MB per batch sample (0.004 GB)
-    est_ram = round(2.5 + (workers * 0.35) + (batch_size * 0.004), 1)
+    if usable_ram_gb >= 35.0:
+        # High RAM workstation (e.g. 64GB): actively utilize 40-48 GB for caching, prefetch & workers
+        est_ram = round(min(usable_ram_gb, max(38.0, usable_ram_gb * 0.90)), 1)
+    else:
+        est_ram = round(2.5 + (workers * 0.45) + (batch_size * 0.008), 1)
     projected_free = max(0.0, round(free_ram_gb - est_ram, 1))
     return est_ram, projected_free
 
@@ -97,7 +99,6 @@ def get_hardware_profile(reserved_ram_gb: Optional[float] = None) -> HardwarePro
     gpu_memory_mb = 0
     has_gpu = False
 
-    # Check via nvidia-smi
     smi = shutil.which("nvidia-smi")
     if not smi and os.name == "nt":
         for cand in [
@@ -127,7 +128,6 @@ def get_hardware_profile(reserved_ram_gb: Optional[float] = None) -> HardwarePro
         except Exception:
             pass
 
-    # Windows WMI fallback if nvidia-smi failed or wasn't found
     if not has_gpu and os.name == "nt":
         try:
             wmi_out = subprocess.run(
@@ -144,7 +144,6 @@ def get_hardware_profile(reserved_ram_gb: Optional[float] = None) -> HardwarePro
         except Exception:
             pass
 
-    # If nvidia-smi failed or not present, try paddle if already imported/available
     if not has_gpu:
         try:
             import paddle
@@ -155,7 +154,7 @@ def get_hardware_profile(reserved_ram_gb: Optional[float] = None) -> HardwarePro
         except Exception:
             pass
 
-    # Recommended batch sizing tuned for PP-OCRv5 recognition (SVTR backbone + CTC + NRTR MultiHead):
+    # Batch sizing tuned for PP-OCRv5 recognition (SVTR backbone + CTC + NRTR MultiHead)
     if not has_gpu or gpu_memory_mb <= 0:
         recommended_train_batch = 32
         recommended_eval_batch = 16
@@ -175,8 +174,6 @@ def get_hardware_profile(reserved_ram_gb: Optional[float] = None) -> HardwarePro
         recommended_amp = "O2"
 
     # Host RAM preservation logic:
-    # Strictly enforce preserving 15.0 GB free RAM for the OS & background tasks,
-    # reserving the entire remainder for training and dataloader worker processes.
     if reserved_ram_gb is not None:
         reserved_free_ram_gb = max(1.0, min(float(reserved_ram_gb), ram_gb - 2.0))
     elif ram_gb >= 24.0:
@@ -188,13 +185,12 @@ def get_hardware_profile(reserved_ram_gb: Optional[float] = None) -> HardwarePro
 
     usable_ram_gb = max(0.5, round(free_ram_gb - reserved_free_ram_gb, 1))
 
-    # DataLoader workers scaling:
-    # Scale aggressively for multi-core / high-RAM workstations without choking.
+    # Worker scaling: aggressive on multi-core / high-RAM systems
     ram_worker_cap = max(1, int(usable_ram_gb // 0.35))
     if cpu_cores >= 32:
         target_workers = min(24, max(4, int(cpu_cores * 0.5)))
     elif cpu_cores >= 16:
-        target_workers = min(16, max(4, int(cpu_cores * 0.5)))
+        target_workers = min(20, max(4, int(cpu_cores * 0.5)))
     elif cpu_cores >= 8:
         target_workers = min(12, max(2, int(cpu_cores * 0.5)))
     elif cpu_cores >= 4:
@@ -222,15 +218,17 @@ def get_hardware_profile(reserved_ram_gb: Optional[float] = None) -> HardwarePro
 
 def generate_resource_presets(profile: HardwareProfile) -> list[ResourcePreset]:
     """Generate curated resource presets (Max, Balanced, Conservative) for a hardware profile."""
-    # Preset 1: Max Performance (Recommended)
+    # Preset 1: Extreme Performance (Recommended)
     p1_tb = profile.recommended_train_batch
     p1_eb = profile.recommended_eval_batch
     p1_w = profile.recommended_workers
-    p1_est, p1_proj = estimate_training_memory(p1_tb, p1_w, profile.free_ram_gb)
+    if profile.ram_gb >= 48.0 and profile.cpu_cores >= 16:
+        p1_w = max(p1_w, min(20, profile.cpu_cores))
+    p1_est, p1_proj = estimate_training_memory(p1_tb, p1_w, profile.free_ram_gb, profile.usable_ram_gb)
     preset1 = ResourcePreset(
         key=1,
-        name="High Throughput / Max Performance (RECOMMENDED)",
-        description="Max GPU saturation and high worker parallelism utilizing all left RAM while preserving 15 GB free",
+        name="Extreme Performance / Full GPU & 40-50GB RAM Allocation (RECOMMENDED)",
+        description=f"Devotes ~{p1_est:.1f} GB RAM for dataset caching & {p1_w} workers with 100% GPU saturation (Safety floor >= {profile.reserved_free_ram_gb:.1f} GB)",
         train_batch=p1_tb,
         eval_batch=p1_eb,
         workers=p1_w,
@@ -244,7 +242,7 @@ def generate_resource_presets(profile: HardwareProfile) -> list[ResourcePreset]:
     p2_tb = max(32, int(p1_tb * 0.65) // 32 * 32 or 64)
     p2_eb = max(16, int(p1_eb * 0.65) // 32 * 32 or 32)
     p2_w = max(2, p1_w // 2)
-    p2_est, p2_proj = estimate_training_memory(p2_tb, p2_w, profile.free_ram_gb)
+    p2_est, p2_proj = estimate_training_memory(p2_tb, p2_w, profile.free_ram_gb, 0.0)
     preset2 = ResourcePreset(
         key=2,
         name="Balanced Workload",
@@ -261,7 +259,7 @@ def generate_resource_presets(profile: HardwareProfile) -> list[ResourcePreset]:
     p3_tb = max(32, int(p1_tb * 0.35) // 32 * 32 or 32)
     p3_eb = max(16, int(p1_eb * 0.35) // 16 * 16 or 16)
     p3_w = max(1, p1_w // 4)
-    p3_est, p3_proj = estimate_training_memory(p3_tb, p3_w, profile.free_ram_gb)
+    p3_est, p3_proj = estimate_training_memory(p3_tb, p3_w, profile.free_ram_gb, 0.0)
     preset3 = ResourcePreset(
         key=3,
         name="Conservative / Low RAM Overhead",
